@@ -1,118 +1,81 @@
 import os
-import subprocess
-import logging
 import json
-import re
-import threading
-import time
+import logging
 from datetime import datetime
+from ptyprocess import PtyProcessUnicode
 
 logger = logging.getLogger(__name__)
-
-ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-backspace_re = re.compile(r'.\x08')
-
-def clean_command(raw: str) -> str:
-    no_ansi = ansi_escape.sub('', raw)
-    while '\x08' in no_ansi:
-        no_ansi = backspace_re.sub('', no_ansi)
-    return no_ansi.replace("^C", "").strip()
+logging.basicConfig(level=logging.INFO)
 
 def run_ssh_session(user: str, host: str, port: int):
     keyfile = "/etc/sshproxy/proxy_keys/external_key1"
     ssh_cmd = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
 
-    log_dir = "/var/log/ssh-proxy/sessions"
-    os.makedirs(log_dir, exist_ok=True)
-
+    initiator = os.getenv("SUDO_USER") or os.getlogin()
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
     pid = os.getpid()
-    initiator = os.getenv("SUDO_USER") or os.getlogin()
-    session_filename = f"{user}@{host}_{timestamp}_{pid}.log"
-    log_file = os.path.join(log_dir, session_filename)
+    session_id = f"{user}@{host}_{timestamp}_{pid}.log"
 
-    json_log_file = "/var/log/ssh-proxy/loki_events.json"
+    commands_file = "/var/log/ssh-proxy/loki_commands.json"
+    os.makedirs("/var/log/ssh-proxy", exist_ok=True)
 
-    session_start_event = {
+    event = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "initiator": initiator,
         "target_user": user,
         "target_host": host,
         "target_port": port,
-        "session_log": session_filename,
+        "session_id": session_id,
         "pid": pid,
-        "session_id": session_filename,
         "action": "ssh_session_start"
     }
+    with open("/var/log/ssh-proxy/loki_events.json", "a") as f:
+        f.write(json.dumps(event) + "\n")
 
+    proc = PtyProcessUnicode.spawn(ssh_cmd)
+    buffer = ""
     try:
-        with open(json_log_file, "a") as f:
-            f.write(json.dumps(session_start_event) + "\n")
-    except Exception as e:
-        logger.warning("Failed to write JSON session start: %s", e)
+        while proc.isalive():
+            try:
+                data = proc.read(1024)
+                print(data, end="")
+                buffer += data
 
-    parser_thread = threading.Thread(
-        target=live_parse,
-        args=(log_file, initiator, user, host, session_filename, port, pid),
-        daemon=True
-    )
-    parser_thread.start()
-
-    full_cmd = ["script", "--return", "-q", "-f", log_file, "-c", " ".join(ssh_cmd)]
-
-    try:
-        subprocess.run(full_cmd)
-    except Exception as e:
-        logger.exception("Failed to run SSH session: %s", e)
-
-def live_parse(log_file, initiator, target_user, target_host, session_id, target_port, pid):
-    commands_file = "/var/log/ssh-proxy/loki_commands.json"
-    #command_regex = re.compile(r"^\[.*@.*\][\$#]\s*(.*)")
-    #command_regex = re.compile(r"^\[.*@.*\][\$#]\s*(.*)")
-    command_regex = re.compile(r"^\[(?P<user>[\w\-]+)@(?P<host>[^]]+)\][\$#]\s+(?P<cmd>.*)")
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+                    stripped = line.strip()
+                    if stripped and not stripped.endswith(":"):
+                        log_command(stripped, initiator, user, host, port, session_id, pid, commands_file)
+            except EOFError:
+                break
+    except KeyboardInterrupt:
+        proc.terminate(force=True)
 
 
-    logger.info("[live_parse] Waiting for log file: %s", log_file)
-    while not os.path.exists(log_file):
-        time.sleep(0.1)
+def log_command(raw: str, initiator, target_user, target_host, target_port, session_id, pid, commands_file):
+    cleaned = raw.replace("\x1b", "").strip()
+    if cleaned:
+        event = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "initiator": initiator,
+            "target_user": target_user,
+            "target_host": target_host,
+            "target_port": target_port,
+            "session_id": session_id,
+            "pid": pid,
+            "action": "ssh_command",
+            "command": cleaned
+        }
+        with open(commands_file, "a") as f:
+            f.write(json.dumps(event) + "\n")
 
-    logger.info("[live_parse] Start reading: %s", log_file)
 
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-u", "--user", required=True)
+    parser.add_argument("-h", "--host", required=True)
+    parser.add_argument("-p", "--port", type=int, default=22)
+    args = parser.parse_args()
 
-    try:
-        with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
-            f.seek(0, os.SEEK_END)
-            while True:
-                line = f.readline()
-                if not line:
-                    time.sleep(0.2)
-                    continue
-
-                line_stripped = line.strip()
-                logger.debug("[live_parse] Line: %s", repr(line_stripped))
-
-                match = command_regex.match(line_stripped)
-                if match:
-                    #raw_command = match.group(2)
-                    raw_command = match.group("cmd")
-                    command = clean_command(raw_command)
-                    if command:
-                        event = {
-                            "timestamp": datetime.utcnow().isoformat() + "Z",
-                            "initiator": initiator,
-                            "target_user": target_user,
-                            "target_host": target_host,
-                            "target_port": target_port,
-                            "session_id": session_id,
-                            "pid": pid,
-                            "action": "ssh_command",
-                            "command": command
-                        }
-                        try:
-                            with open(commands_file, "a", encoding='utf-8') as outf:
-                                outf.write(json.dumps(event) + "\n")
-                            logger.debug("[live_parse] Logged command: %s", command)
-                        except Exception as e:
-                            logger.warning("[live_parse] Write failed: %s", e)
-    except Exception as e:
-        logger.warning("[live_parse] Error: %s", e)
+    run_ssh_session(args.user, args.host, args.port)
