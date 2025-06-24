@@ -72,7 +72,8 @@ def parse_and_append_json(log_file: str, initiator: str, target_user: str, targe
     #command_regex = re.compile(rf"^\[{re.escape(target_user)}@.*?\]\s+\$\s+(.*)$")
     #command_regex = re.compile(r"\[\w+@[\w\-.]+\s+[^\]]*\]\s+\$\s+(.*)")
     #command_regex = re.compile(rf"\[\s*{re.escape(target_user)}@\S+.*?\]\s*\$\s+(.*)")
-    command_regex = re.compile(rf"\[\s*{re.escape(target_user)}@[^]]+\]\s*[$#]\s+(.*)")
+    #command_regex = re.compile(rf"\[\s*{re.escape(target_user)}@[^]]+\]\s*[$#]\s+(.*)")
+    command_regex = re.compile(r"\[\s*(?P<user>\w+)@\S+.*?\]\s*[#$]\s+(.*)")
 
     try:
         with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
@@ -89,7 +90,8 @@ def parse_and_append_json(log_file: str, initiator: str, target_user: str, targe
 
                 match = command_regex.search(line_stripped)
                 if match:
-                    command = match.group(1).strip()
+                    #command = match.group(1).strip()
+                    command = match.group(2).strip()
                     if command:
                         event = {
                             "command_timestamp": datetime.utcnow().isoformat() + "Z",
