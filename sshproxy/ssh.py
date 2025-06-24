@@ -5,6 +5,10 @@ import sys
 import termios
 import tty
 import select
+import sys
+import termios
+import tty
+import select
 from datetime import datetime
 from ptyprocess import PtyProcessUnicode
 
@@ -38,44 +42,24 @@ def run_ssh_session(user: str, host: str, port: int):
         f.write(json.dumps(session_start_event) + "\n")
 
     proc = PtyProcessUnicode.spawn(ssh_cmd)
-    input_buffer = ""
-
-    old_settings = termios.tcgetattr(sys.stdin)
-    tty.setraw(sys.stdin.fileno())
-
+    buffer = ""
     try:
         while proc.isalive():
-            rlist, _, _ = select.select([sys.stdin, proc.fd], [], [], 0.1)
+            try:
+                data = proc.read(1024)
+                print(data, end="")
+                buffer += data
 
-            if sys.stdin in rlist:
-                user_input = os.read(sys.stdin.fileno(), 1024).decode(errors="ignore")
-                proc.write(user_input)
-                input_buffer += user_input
+                while "\n" in buffer:
+                    line, buffer = buffer.split("\n", 1)
+                    stripped = line.strip()
+                    if stripped and not stripped.endswith(":"):
+                        log_command(stripped, initiator, user, host, port, session_id, pid, commands_file)
+            except EOFError:
+                break
+    except KeyboardInterrupt:
+        proc.terminate(force=True)
 
-                if '\n' in user_input:
-                    command = input_buffer.strip().split('\n')[-1]
-                    if is_real_command(command):
-                        log_command(command, initiator, user, host, port, session_id, pid, commands_file)
-                    input_buffer = ""
-
-            if proc.fd in rlist:
-                output = proc.read(1024)
-                if output:
-                    sys.stdout.write(output)
-                    sys.stdout.flush()
-    finally:
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-        proc.close(force=True)
-
-def is_real_command(cmd: str) -> bool:
-    cmd = cmd.strip()
-    if not cmd:
-        return False
-    ignore = [
-        "Last login", "Connection to", "logout",
-        "[?2004h", "[?2004l", "\x07", "\x1b"
-    ]
-    return not any(x in cmd for x in ignore)
 
 def log_command(raw: str, initiator, target_user, target_host, target_port, session_id, pid, commands_file):
     cleaned = raw.replace("\x1b", "").strip()
