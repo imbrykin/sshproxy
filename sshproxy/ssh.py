@@ -1,6 +1,7 @@
 import os
 import subprocess
 import logging
+import json
 from datetime import datetime
 from sshproxy.ports import get_free_port, log_assigned_port
 
@@ -15,42 +16,36 @@ def run_ssh_session(user: str, host: str, port: int):
 
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
     pid = os.getpid()
+    initiator = os.getenv("SUDO_USER") or os.getlogin()
     session_filename = f"{user}@{host}_{timestamp}_{pid}.log"
     log_file = os.path.join(log_dir, session_filename)
 
-    initiator = os.getenv("SUDO_USER") or os.getlogin()
+    # Команда для логирования всей сессии
+    full_cmd = ["script", "-q", "-f", log_file, "-c", " ".join(ssh_cmd)]
 
-    # Временный файл с заголовком
-    header_file = f"/tmp/sshproxy_header_{pid}.txt"
+    # JSON-лог
+    json_event = {
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "initiator": initiator,
+        "target_user": user,
+        "target_host": host,
+        "target_port": port,
+        "session_log": session_filename,
+        "pid": pid,
+        "action": "ssh_session_start"
+    }
+
+    json_log_file = "/var/log/ssh-proxy/loki_events.json"
     try:
-        with open(header_file, "w") as f:
-            f.write(f"Script started on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S+00:00')} by {initiator}\n")
+        with open(json_log_file, "a") as f:
+            f.write(json.dumps(json_event) + "\n")
     except Exception as e:
-        logger.warning("Failed to write header: %s", e)
-
-    script_log_tmp = f"/tmp/sshproxy_session_{pid}.tmp"
-    full_cmd = ["script", "-q", "-f", script_log_tmp, "-c", " ".join(ssh_cmd)]
+        logger.warning("Failed to write JSON session log: %s", e)
 
     logger.info("Starting SSH session to %s@%s:%d", user, host, port)
     logger.info("Session log: %s", log_file)
 
-    # Запись mapping
-    hostname_log = "/var/log/ssh-proxy/hostnames.txt"
-    try:
-        with open(hostname_log, "a") as f:
-            f.write(f"{datetime.utcnow().isoformat()}Z | {initiator} -> {user}@{host}:{port} => {session_filename}\n")
-    except Exception as e:
-        logger.warning("Failed to log hostname mapping: %s", e)
-
     try:
         subprocess.run(full_cmd)
-        # Объединяем header и лог
-        with open(log_file, "wb") as final_log:
-            with open(header_file, "rb") as h, open(script_log_tmp, "rb") as s:
-                final_log.write(h.read())
-                final_log.write(s.read())
     except Exception as e:
         logger.exception("Failed to start SSH session via script: %s", e)
-    finally:
-        os.remove(header_file)
-        os.remove(script_log_tmp)
