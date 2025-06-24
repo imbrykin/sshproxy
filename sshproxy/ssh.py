@@ -19,7 +19,7 @@ def run_ssh_session(user: str, host: str, port: int):
     log_file = os.path.join(log_dir, session_filename)
 
     # Команда через script для логирования всей сессии
-    full_cmd = ["script", "-q", "-f", log_file, "--"] + ssh_cmd
+    full_cmd = ["script", "-q", "-f", log_file, "-c", " ".join(ssh_cmd)]
 
     logger.info("Starting SSH session to %s@%s:%d", user, host, port)
     logger.info("Session log: %s", log_file)
