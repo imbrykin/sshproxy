@@ -18,7 +18,6 @@ def clean_command(raw: str) -> str:
         no_ansi = backspace_re.sub('', no_ansi)
     return no_ansi.replace("^C", "").strip()
 
-
 def run_ssh_session(user: str, host: str, port: int):
     keyfile = "/etc/sshproxy/proxy_keys/external_key1"
     ssh_cmd = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
@@ -66,25 +65,13 @@ def run_ssh_session(user: str, host: str, port: int):
     except Exception as e:
         logger.exception("Failed to run SSH session: %s", e)
 
-
 def live_parse(log_file, initiator, target_user, target_host, session_id, target_port, pid):
     commands_file = "/var/log/ssh-proxy/loki_commands.json"
-    #command_regex = re.compile(r"\[\s*(?P<user>\w+)@\S+.*?\]\s*[#$]\s+(.*)")
-    command_regex = re.compile(r"\[\s*(?P<user>\w+)@\S+.*?\]\s*[#$]\s*(.*)")
-
+    command_regex = re.compile(r"^\[(?P<user>\w+)@\S+.*?\]\s?[#$]\s?(.*)$")
 
     logger.info("[live_parse] Waiting for log file: %s", log_file)
-
-    # Ждём появления файла
-    timeout = 10  # секунд
-    waited = 0
-    while not os.path.exists(log_file) and waited < timeout:
-        time.sleep(0.2)
-        waited += 0.2
-
-    if not os.path.exists(log_file):
-        logger.error("[live_parse] File %s not created after %d seconds", log_file, timeout)
-        return
+    while not os.path.exists(log_file):
+        time.sleep(0.1)
 
     logger.info("[live_parse] Start reading: %s", log_file)
 
@@ -94,10 +81,13 @@ def live_parse(log_file, initiator, target_user, target_host, session_id, target
             while True:
                 line = f.readline()
                 if not line:
-                    time.sleep(0.1)
+                    time.sleep(0.2)
                     continue
 
-                match = command_regex.search(line.strip())
+                line_stripped = line.strip()
+                logger.debug("[live_parse] Line: %s", repr(line_stripped))
+
+                match = command_regex.match(line_stripped)
                 if match:
                     raw_command = match.group(2)
                     command = clean_command(raw_command)
@@ -113,7 +103,11 @@ def live_parse(log_file, initiator, target_user, target_host, session_id, target
                             "action": "ssh_command",
                             "command": command
                         }
-                        with open(commands_file, "a", encoding='utf-8') as outf:
-                            outf.write(json.dumps(event) + "\n")
+                        try:
+                            with open(commands_file, "a", encoding='utf-8') as outf:
+                                outf.write(json.dumps(event) + "\n")
+                            logger.debug("[live_parse] Logged command: %s", command)
+                        except Exception as e:
+                            logger.warning("[live_parse] Write failed: %s", e)
     except Exception as e:
         logger.warning("[live_parse] Error: %s", e)
