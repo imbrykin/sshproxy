@@ -18,6 +18,7 @@ def clean_command(raw: str) -> str:
         no_ansi = backspace_re.sub('', no_ansi)
     return no_ansi.replace("^C", "").strip()
 
+
 def run_ssh_session(user: str, host: str, port: int):
     keyfile = "/etc/sshproxy/proxy_keys/external_key1"
     ssh_cmd = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
@@ -65,24 +66,35 @@ def run_ssh_session(user: str, host: str, port: int):
     except Exception as e:
         logger.exception("Failed to run SSH session: %s", e)
 
+
 def live_parse(log_file, initiator, target_user, target_host, session_id, target_port, pid):
     commands_file = "/var/log/ssh-proxy/loki_commands.json"
-    command_regex = re.compile(r"\[\s*(?P<user>\\w+)@\\S+.*?\]\s*[#$]\s+(.*)")
+    command_regex = re.compile(r"\[\s*(?P<user>\w+)@\S+.*?\]\s*[#$]\s+(.*)")
 
-    logger.info("[live_parse] Watching log file: %s", log_file)
+    logger.info("[live_parse] Waiting for log file: %s", log_file)
 
-    # Wait for the file to appear
-    while not os.path.exists(log_file):
-        time.sleep(0.1)
+    # Ждём появления файла
+    timeout = 10  # секунд
+    waited = 0
+    while not os.path.exists(log_file) and waited < timeout:
+        time.sleep(0.2)
+        waited += 0.2
+
+    if not os.path.exists(log_file):
+        logger.error("[live_parse] File %s not created after %d seconds", log_file, timeout)
+        return
+
+    logger.info("[live_parse] Start reading: %s", log_file)
 
     try:
         with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
-            f.seek(0, os.SEEK_END)  # Go to the end of the file
+            f.seek(0, os.SEEK_END)
             while True:
                 line = f.readline()
                 if not line:
-                    time.sleep(0.2)
+                    time.sleep(0.1)
                     continue
+
                 match = command_regex.search(line.strip())
                 if match:
                     raw_command = match.group(2)
