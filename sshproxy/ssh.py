@@ -24,6 +24,14 @@ def run_ssh_session(user: str, host: str, port: int):
     logger.info("Starting SSH session to %s@%s:%d", user, host, port)
     logger.info("Session log: %s", log_file)
 
+    # Логирование hostname mapping
+    hostname_log = "/var/log/ssh-proxy/hostnames.txt"
+    try:
+        with open(hostname_log, "a") as f:
+            f.write(f"{datetime.utcnow().isoformat()}Z | {user}@{host}:{port} -> {session_filename}\n")
+    except Exception as e:
+        logger.warning("Failed to log hostname mapping: %s", e)
+
     try:
         subprocess.run(full_cmd)
     except Exception as e:
