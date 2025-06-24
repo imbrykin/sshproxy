@@ -6,7 +6,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-CONFIG_PATH = "/etc/sshproxy/config.yaml"
+CONFIG_PATH = "/opt/sshproxy/config.yaml"
 
 def load_config():
     try:
