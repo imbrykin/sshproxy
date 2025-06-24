@@ -8,6 +8,16 @@ from sshproxy.ports import get_free_port, log_assigned_port
 
 logger = logging.getLogger(__name__)
 
+# --- Очистка управляющих символов в команде ---
+ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+backspace_re = re.compile(r'.\x08')  # Удаляет символ + backspace
+
+def clean_command(raw: str) -> str:
+    no_ansi = ansi_escape.sub('', raw)
+    while '\x08' in no_ansi:
+        no_ansi = backspace_re.sub('', no_ansi)
+    return no_ansi.replace("^C", "").strip()
+
 
 def run_ssh_session(user: str, host: str, port: int):
     keyfile = "/etc/sshproxy/proxy_keys/external_key1"
@@ -24,7 +34,6 @@ def run_ssh_session(user: str, host: str, port: int):
 
     full_cmd = ["script", "-q", "-f", log_file, "-c", " ".join(ssh_cmd)]
 
-    # JSON event: session start
     json_event = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "initiator": initiator,
@@ -62,18 +71,8 @@ def run_ssh_session(user: str, host: str, port: int):
 
 
 def parse_and_append_json(log_file: str, initiator: str, target_user: str, target_host: str, session_id: str):
-    import logging
-    import re
-    import json
-    from datetime import datetime
-
-    logger = logging.getLogger(__name__)
-    commands_file = "/var/log/ssh-proxy/loki_commands.json"
-    #command_regex = re.compile(rf"^\[{re.escape(target_user)}@.*?\]\s+\$\s+(.*)$")
-    #command_regex = re.compile(r"\[\w+@[\w\-.]+\s+[^\]]*\]\s+\$\s+(.*)")
-    #command_regex = re.compile(rf"\[\s*{re.escape(target_user)}@\S+.*?\]\s*\$\s+(.*)")
-    #command_regex = re.compile(rf"\[\s*{re.escape(target_user)}@[^]]+\]\s*[$#]\s+(.*)")
     command_regex = re.compile(r"\[\s*(?P<user>\w+)@\S+.*?\]\s*[#$]\s+(.*)")
+    commands_file = "/var/log/ssh-proxy/loki_commands.json"
 
     try:
         with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
@@ -90,8 +89,8 @@ def parse_and_append_json(log_file: str, initiator: str, target_user: str, targe
 
                 match = command_regex.search(line_stripped)
                 if match:
-                    #command = match.group(1).strip()
-                    command = match.group(2).strip()
+                    raw_command = match.group(2).strip()
+                    command = clean_command(raw_command)
                     if command:
                         event = {
                             "command_timestamp": datetime.utcnow().isoformat() + "Z",
