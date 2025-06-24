@@ -5,10 +5,6 @@ import sys
 import termios
 import tty
 import select
-import sys
-import termios
-import tty
-import select
 from datetime import datetime
 from ptyprocess import PtyProcessUnicode
 
@@ -27,7 +23,7 @@ def run_ssh_session(user: str, host: str, port: int):
     commands_file = "/var/log/ssh-proxy/loki_commands.json"
     os.makedirs("/var/log/ssh-proxy", exist_ok=True)
 
-    session_start_event = {
+    event = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "initiator": initiator,
         "target_user": user,
@@ -37,29 +33,39 @@ def run_ssh_session(user: str, host: str, port: int):
         "pid": pid,
         "action": "ssh_session_start"
     }
-
     with open("/var/log/ssh-proxy/loki_events.json", "a") as f:
-        f.write(json.dumps(session_start_event) + "\n")
+        f.write(json.dumps(event) + "\n")
 
     proc = PtyProcessUnicode.spawn(ssh_cmd)
-    buffer = ""
+    input_buffer = ""
+
+    old_settings = termios.tcgetattr(sys.stdin)
+    tty.setraw(sys.stdin.fileno())
+
     try:
         while proc.isalive():
-            try:
-                data = proc.read(1024)
-                print(data, end="")
-                buffer += data
+            rlist, _, _ = select.select([sys.stdin, proc.fd], [], [], 0.1)
 
-                while "\n" in buffer:
-                    line, buffer = buffer.split("\n", 1)
-                    stripped = line.strip()
-                    if stripped and not stripped.endswith(":"):
-                        log_command(stripped, initiator, user, host, port, session_id, pid, commands_file)
-            except EOFError:
-                break
-    except KeyboardInterrupt:
-        proc.terminate(force=True)
+            if sys.stdin in rlist:
+                user_input = os.read(sys.stdin.fileno(), 1024).decode(errors="ignore")
+                proc.write(user_input)
+                input_buffer += user_input
 
+                if '\n' in user_input:
+                    command = input_buffer.strip()
+                    if command:
+                        log_command(command, initiator, user, host, port, session_id, pid, commands_file)
+                    input_buffer = ""
+
+            if proc.fd in rlist:
+                output = proc.read(1024)
+                if output:
+                    sys.stdout.write(output)
+                    sys.stdout.flush()
+
+    finally:
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+        proc.close(force=True)
 
 def log_command(raw: str, initiator, target_user, target_host, target_port, session_id, pid, commands_file):
     cleaned = raw.replace("\x1b", "").strip()
@@ -77,6 +83,7 @@ def log_command(raw: str, initiator, target_user, target_host, target_port, sess
         }
         with open(commands_file, "a") as f:
             f.write(json.dumps(event) + "\n")
+
 
 if __name__ == "__main__":
     import argparse
