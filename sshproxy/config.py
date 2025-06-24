@@ -35,11 +35,19 @@ def is_access_allowed(user: str, host: str) -> bool:
     rules = config.get("access_control", {})
     user_groups = get_user_groups(user)
 
+    logger.debug("User %s groups: %s", user, user_groups)
+    logger.debug("Access rules: %s", rules)
+
     for group in user_groups:
         policy = rules.get(group)
         if not policy:
+            logger.debug("No policy found for group: %s", group)
             continue
         for pattern in policy.get("allow_hosts", []):
+            logger.debug("Checking host %s against pattern %s from group %s", host, pattern, group)
             if fnmatch.fnmatch(host, pattern):
-                logger.info("Access allowed by group '%s' pattern '%s'", group, pattern)
+                logger.info("Access allowed by group '%s' and pattern '%s'", group, pattern)
                 return True
+
+    logger.warning("Access denied by policy: user=%s groups=%s host=%s", user, user_groups, host)
+    return False
