@@ -12,7 +12,14 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 def run_ssh_session(user: str, host: str, port: int):
-    keyfile = "/etc/sshproxy/proxy_keys/external_key1"
+    keyfile = os.getenv("KEY_FILE", "/etc/sshproxy/proxy_keys/external_key1")
+    log_dir = os.getenv("LOG_DIR", "/var/log/ssh-proxy")
+    log_file_name = os.getenv("LOG_FILE", "sshproxy_events.json")
+    commands_file = os.path.join(log_dir, log_file_name)
+
+    # отладочный вывод, временно
+    print(f"[DEBUG] keyfile={keyfile}, log_dir={log_dir}, commands_file={commands_file}")
+
     ssh_cmd = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
 
     initiator = os.getenv("SUDO_USER") or os.getlogin()
@@ -21,8 +28,7 @@ def run_ssh_session(user: str, host: str, port: int):
     session_id = f"{user}@{host}_{timestamp}_{pid}"
     log_file = f"{session_id}.log"
 
-    commands_file = "/var/log/ssh-proxy/loki_commands.json"
-    os.makedirs("/var/log/ssh-proxy", exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
 
     # log session start
     event = {
@@ -36,7 +42,7 @@ def run_ssh_session(user: str, host: str, port: int):
         "pid": pid,
         "action": "ssh_session_start"
     }
-    with open("/var/log/ssh-proxy/loki_events.json", "a") as f:
+    with open(commands_file, "a") as f:
         f.write(json.dumps(event) + "\n")
 
     proc = PtyProcessUnicode.spawn(ssh_cmd)
