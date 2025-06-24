@@ -18,7 +18,8 @@ def run_ssh_session(user: str, host: str, port: int):
     initiator = os.getenv("SUDO_USER") or os.getlogin()
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
     pid = os.getpid()
-    session_id = f"{user}@{host}_{timestamp}_{pid}.log"
+    session_id = f"{user}@{host}_{timestamp}_{pid}"
+    log_file = f"{session_id}.log"
 
     commands_file = "/var/log/ssh-proxy/loki_commands.json"
     os.makedirs("/var/log/ssh-proxy", exist_ok=True)
@@ -31,6 +32,7 @@ def run_ssh_session(user: str, host: str, port: int):
         "target_host": host,
         "target_port": port,
         "session_id": session_id,
+        "log_file": log_file,
         "pid": pid,
         "action": "ssh_session_start"
     }
