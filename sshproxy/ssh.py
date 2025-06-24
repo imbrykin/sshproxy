@@ -4,12 +4,12 @@ import logging
 import sys
 import termios
 import tty
+import select
 from datetime import datetime
 from ptyprocess import PtyProcessUnicode
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-
 
 def run_ssh_session(user: str, host: str, port: int):
     keyfile = "/etc/sshproxy/proxy_keys/external_key1"
@@ -23,6 +23,7 @@ def run_ssh_session(user: str, host: str, port: int):
     commands_file = "/var/log/ssh-proxy/loki_commands.json"
     os.makedirs("/var/log/ssh-proxy", exist_ok=True)
 
+    # log session start
     event = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "initiator": initiator,
@@ -37,23 +38,25 @@ def run_ssh_session(user: str, host: str, port: int):
         f.write(json.dumps(event) + "\n")
 
     proc = PtyProcessUnicode.spawn(ssh_cmd)
+    buffer = ""
 
     old_settings = termios.tcgetattr(sys.stdin)
-    tty.setraw(sys.stdin.fileno())  # raw режим
-
-    buffer = ""
+    tty.setraw(sys.stdin.fileno())
 
     try:
         while proc.isalive():
-            # читаем и отображаем вывод ssh-сессии
-            if proc.fd in proc._select([proc.fd], [], [], 0.01)[0]:
-                data = proc.read(1024)
-                sys.stdout.write(data)
-                sys.stdout.flush()
+            rlist, _, _ = select.select([proc.fd, sys.stdin], [], [], 0.1)
 
-            # читаем ввод пользователя посимвольно
-            if sys.stdin in proc._select([sys.stdin], [], [], 0.01)[0]:
-                ch = sys.stdin.read(1)
+            if proc.fd in rlist:
+                try:
+                    data = proc.read(1024)
+                    sys.stdout.write(data)
+                    sys.stdout.flush()
+                except EOFError:
+                    break
+
+            if sys.stdin in rlist:
+                ch = os.read(sys.stdin.fileno(), 1).decode()
                 proc.write(ch)
                 buffer += ch
 
