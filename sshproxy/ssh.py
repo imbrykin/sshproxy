@@ -4,12 +4,12 @@ import logging
 import sys
 import termios
 import tty
-import select
 from datetime import datetime
 from ptyprocess import PtyProcessUnicode
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
 
 def run_ssh_session(user: str, host: str, port: int):
     keyfile = "/etc/sshproxy/proxy_keys/external_key1"
@@ -39,35 +39,29 @@ def run_ssh_session(user: str, host: str, port: int):
     proc = PtyProcessUnicode.spawn(ssh_cmd)
 
     old_settings = termios.tcgetattr(sys.stdin)
-    tty.setraw(sys.stdin.fileno())
+    tty.setraw(sys.stdin.fileno())  # raw режим
 
-    command_buffer = ""
+    buffer = ""
 
     try:
         while proc.isalive():
-            rlist, _, _ = select.select([proc.fd, sys.stdin], [], [], 0.1)
+            # читаем и отображаем вывод ssh-сессии
+            if proc.fd in proc._select([proc.fd], [], [], 0.01)[0]:
+                data = proc.read(1024)
+                sys.stdout.write(data)
+                sys.stdout.flush()
 
-            if sys.stdin in rlist:
-                user_input = os.read(sys.stdin.fileno(), 1024).decode(errors="ignore")
-                proc.write(user_input)
+            # читаем ввод пользователя посимвольно
+            if sys.stdin in proc._select([sys.stdin], [], [], 0.01)[0]:
+                ch = sys.stdin.read(1)
+                proc.write(ch)
+                buffer += ch
 
-                command_buffer += user_input
-
-                if "\n" in user_input:
-                    # логируем только первую команду (до первой новой строки)
-                    command = command_buffer.strip()
+                if ch == "\r":  # Enter
+                    command = buffer.strip()
+                    buffer = ""
                     if command:
                         log_command(command, initiator, user, host, port, session_id, pid, commands_file)
-                    command_buffer = ""
-
-            if proc.fd in rlist:
-                try:
-                    output = proc.read(1024)
-                    if output:
-                        sys.stdout.write(output)
-                        sys.stdout.flush()
-                except EOFError:
-                    break
     finally:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         proc.close(force=True)
