@@ -1,0 +1,11 @@
+[Unit]
+Description=SSH Proxy CLI Service (manual run)
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/sshproxy
+StandardOutput=journal
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

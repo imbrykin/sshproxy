@@ -1,0 +1,7 @@
+access_control:
+  devops:
+    allow_hosts:
+      - "*"
+  support:
+    allow_hosts:
+      - "*."

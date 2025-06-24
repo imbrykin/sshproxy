@@ -1,0 +1,10 @@
+[Unit]
+Description=Run SSHProxy cleanup every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+Unit=sshproxy-cleanup.service
+
+[Install]
+WantedBy=timers.target
