@@ -5,17 +5,11 @@ import sys
 import termios
 import tty
 import select
-import re
 from datetime import datetime
 from ptyprocess import PtyProcessUnicode
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-
-# Регулярки для чистки ANSI-последовательностей и прочего шума
-ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-shell_prompt_prefix = re.compile(r'^\]0;.*?\x07')
-decorations = re.compile(r'[\x07\x1b].*?[\x07m]|[\r]|\[?2004[hl]')
 
 def run_ssh_session(user: str, host: str, port: int):
     keyfile = "/etc/sshproxy/proxy_keys/external_key1"
@@ -43,31 +37,35 @@ def run_ssh_session(user: str, host: str, port: int):
         f.write(json.dumps(event) + "\n")
 
     proc = PtyProcessUnicode.spawn(ssh_cmd)
-    buffer = ""
 
     old_settings = termios.tcgetattr(sys.stdin)
     tty.setraw(sys.stdin.fileno())
+
+    command_buffer = ""
 
     try:
         while proc.isalive():
             rlist, _, _ = select.select([proc.fd, sys.stdin], [], [], 0.1)
 
             if sys.stdin in rlist:
-                user_input = os.read(sys.stdin.fileno(), 1024).decode()
+                user_input = os.read(sys.stdin.fileno(), 1024).decode(errors="ignore")
                 proc.write(user_input)
+
+                command_buffer += user_input
+
+                if "\n" in user_input:
+                    # логируем только первую команду (до первой новой строки)
+                    command = command_buffer.strip()
+                    if command:
+                        log_command(command, initiator, user, host, port, session_id, pid, commands_file)
+                    command_buffer = ""
 
             if proc.fd in rlist:
                 try:
-                    data = proc.read(1024)
-                    if data:
-                        sys.stdout.write(data)
+                    output = proc.read(1024)
+                    if output:
+                        sys.stdout.write(output)
                         sys.stdout.flush()
-                        buffer += data
-
-                        while "\n" in buffer:
-                            line, buffer = buffer.split("\n", 1)
-                            stripped = line.strip()
-                            log_command(stripped, initiator, user, host, port, session_id, pid, commands_file)
                 except EOFError:
                     break
     finally:
@@ -76,26 +74,7 @@ def run_ssh_session(user: str, host: str, port: int):
 
 
 def log_command(raw: str, initiator, target_user, target_host, target_port, session_id, pid, commands_file):
-    # Удаляем ANSI-последовательности, управляющие символы, BEL, ESC, etc.
-    cleaned = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', raw)   # ANSI sequences
-    cleaned = re.sub(r'\x1b.*?\x07', '', cleaned)         # OSC (title set etc.)
-    cleaned = re.sub(r'[\x00-\x1F\x7F]', '', cleaned)     # control chars (BEL, BS, etc.)
-
-    cleaned = cleaned.strip()
-
-    # Простой фильтр: игнорируем системные строки и вывод
-    ignore_patterns = [
-        r'^Last login',
-        r'^Connection to .* closed',
-        r'^logout$',
-        r'^\[.*@.*\s~\]\$.*$',  # prompt
-        r'^\s*$',               # пустые строки
-        r'^\-r.+'               # строки из ls/ll вывода
-    ]
-    for pattern in ignore_patterns:
-        if re.match(pattern, cleaned):
-            return
-
+    cleaned = raw.replace("\x1b", "").strip()
     if cleaned:
         event = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -110,6 +89,7 @@ def log_command(raw: str, initiator, target_user, target_host, target_port, sess
         }
         with open(commands_file, "a") as f:
             f.write(json.dumps(event) + "\n")
+
 
 if __name__ == "__main__":
     import argparse
