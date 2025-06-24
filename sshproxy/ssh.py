@@ -66,13 +66,23 @@ def run_ssh_session(user: str, host: str, port: int):
         initiator=initiator,
         target_user=user,
         target_host=host,
-        session_id=session_filename
+        session_id=session_filename,
+        target_port=port
     )
 
 
-def parse_and_append_json(log_file: str, initiator: str, target_user: str, target_host: str, session_id: str):
-    command_regex = re.compile(r"\[\s*(?P<user>\w+)@\S+.*?\]\s*[#$]\s+(.*)")
+def parse_and_append_json(
+    log_file: str,
+    initiator: str,
+    target_user: str,
+    target_host: str,
+    session_id: str,
+    target_port: int
+):
+    logger = logging.getLogger(__name__)
     commands_file = "/var/log/ssh-proxy/loki_commands.json"
+
+    command_regex = re.compile(r"\[\s*(?P<user>\w+)@\S+.*?\]\s*[#$]\s+(.*)")
 
     try:
         with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
@@ -89,15 +99,18 @@ def parse_and_append_json(log_file: str, initiator: str, target_user: str, targe
 
                 match = command_regex.search(line_stripped)
                 if match:
-                    raw_command = match.group(2).strip()
+                    raw_command = match.group(2)
                     command = clean_command(raw_command)
                     if command:
                         event = {
-                            "command_timestamp": datetime.utcnow().isoformat() + "Z",
+                            "timestamp": datetime.utcnow().isoformat() + "Z",
                             "initiator": initiator,
                             "target_user": target_user,
                             "target_host": target_host,
+                            "target_port": target_port,
                             "session_id": session_id,
+                            "pid": int(session_id.split("_")[-1].split(".")[0]),
+                            "action": "ssh_command",
                             "command": command
                         }
                         outf.write(json.dumps(event) + "\n")
