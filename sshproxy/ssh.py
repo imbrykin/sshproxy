@@ -62,22 +62,32 @@ def run_ssh_session(user: str, host: str, port: int):
 
 
 def parse_and_append_json(log_file: str, initiator: str, target_user: str, target_host: str, session_id: str):
+    import logging
+    import re
+    import json
+    from datetime import datetime
+
+    logger = logging.getLogger(__name__)
     commands_file = "/var/log/ssh-proxy/loki_commands.json"
     #command_regex = re.compile(rf"^\[{re.escape(target_user)}@.*?\]\s+\$\s+(.*)$")
-    command_regex = re.compile(r"\[\w+@[\w\-.]+\s+[^\]]*\]\s+\$\s+(.*)")
+    #command_regex = re.compile(r"\[\w+@[\w\-.]+\s+[^\]]*\]\s+\$\s+(.*)")
+    #command_regex = re.compile(rf"\[\s*{re.escape(target_user)}@\S+.*?\]\s*\$\s+(.*)")
+    command_regex = re.compile(rf"\[\s*{re.escape(target_user)}@[^]]+\]\s*[$#]\s+(.*)")
 
     try:
-        with open(log_file, "r") as f:
+        with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
             lines = f.readlines()
     except Exception as e:
         logger.warning("Failed to read log file for command parsing: %s", e)
         return
 
     try:
-        with open(commands_file, "a") as outf:
+        with open(commands_file, "a", encoding="utf-8") as outf:
             for line in lines:
-                logger.debug("Line from log: %r", line)  # покажет всю строку, включая \x1b и прочее
-                match = command_regex.match(line)
+                line_stripped = line.strip()
+                logger.debug(f"[parse] Checking line: {repr(line_stripped)}")
+
+                match = command_regex.search(line_stripped)
                 if match:
                     command = match.group(1).strip()
                     if command:
@@ -90,5 +100,6 @@ def parse_and_append_json(log_file: str, initiator: str, target_user: str, targe
                             "command": command
                         }
                         outf.write(json.dumps(event) + "\n")
+                        logger.debug(f"[parse] Logged command: {command}")
     except Exception as e:
         logger.warning("Failed to write commands to JSON log: %s", e)
