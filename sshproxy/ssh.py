@@ -2,10 +2,12 @@ import os
 import subprocess
 import logging
 import json
+import re
 from datetime import datetime
 from sshproxy.ports import get_free_port, log_assigned_port
 
 logger = logging.getLogger(__name__)
+
 
 def run_ssh_session(user: str, host: str, port: int):
     keyfile = "/etc/sshproxy/proxy_keys/external_key1"
@@ -20,10 +22,9 @@ def run_ssh_session(user: str, host: str, port: int):
     session_filename = f"{user}@{host}_{timestamp}_{pid}.log"
     log_file = os.path.join(log_dir, session_filename)
 
-    # Команда для логирования всей сессии
     full_cmd = ["script", "-q", "-f", log_file, "-c", " ".join(ssh_cmd)]
 
-    # JSON-лог
+    # JSON event: session start
     json_event = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "initiator": initiator,
@@ -32,6 +33,7 @@ def run_ssh_session(user: str, host: str, port: int):
         "target_port": port,
         "session_log": session_filename,
         "pid": pid,
+        "session_id": session_filename,
         "action": "ssh_session_start"
     }
 
@@ -49,3 +51,42 @@ def run_ssh_session(user: str, host: str, port: int):
         subprocess.run(full_cmd)
     except Exception as e:
         logger.exception("Failed to start SSH session via script: %s", e)
+
+    parse_and_append_json(
+        log_file=log_file,
+        initiator=initiator,
+        target_user=user,
+        target_host=host,
+        session_id=session_filename
+    )
+
+
+def parse_and_append_json(log_file: str, initiator: str, target_user: str, target_host: str, session_id: str):
+    commands_file = "/var/log/ssh-proxy/loki_commands.json"
+    command_regex = re.compile(rf"^\[{re.escape(target_user)}@.*?\]\s+\$\s+(.*)$")
+
+    try:
+        with open(log_file, "r") as f:
+            lines = f.readlines()
+    except Exception as e:
+        logger.warning("Failed to read log file for command parsing: %s", e)
+        return
+
+    try:
+        with open(commands_file, "a") as outf:
+            for line in lines:
+                match = command_regex.match(line)
+                if match:
+                    command = match.group(1).strip()
+                    if command:
+                        event = {
+                            "command_timestamp": datetime.utcnow().isoformat() + "Z",
+                            "initiator": initiator,
+                            "target_user": target_user,
+                            "target_host": target_host,
+                            "session_id": session_id,
+                            "command": command
+                        }
+                        outf.write(json.dumps(event) + "\n")
+    except Exception as e:
+        logger.warning("Failed to write commands to JSON log: %s", e)
