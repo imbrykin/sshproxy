@@ -18,7 +18,13 @@ def load_config():
 
 def get_user_groups(user: str):
     try:
-        result = subprocess.run(["id", "-nG", user], capture_output=True, text=True, check=True)
+        result = subprocess.run(
+            ["id", "-nG", user],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            check=True
+        )
         return result.stdout.strip().split()
     except subprocess.CalledProcessError:
         logger.warning("Failed to get groups for user %s", user)
