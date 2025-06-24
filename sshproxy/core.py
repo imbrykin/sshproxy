@@ -2,7 +2,7 @@ import os
 import getpass
 import logging
 from sshproxy.ipa import check_access
-from sshproxy.ssh import run_ssh_session, run_sftp_proxy
+from sshproxy.ssh import run_ssh_session
 from sshproxy.config import is_access_allowed
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,8 @@ def start_session(host: str, user: str, mode: int, port: int):
     if mode == 0:
         run_ssh_session(user, host, port)
     elif mode == 1:
-        run_sftp_proxy(user, host, port)
+        print("[ERROR] SFTP proxy mode is not implemented.")
+        logger.error("Attempted SFTP mode but it's not implemented.")
     else:
         logger.error("Unknown mode: %s", mode)
         print("[ERROR] Unknown mode. Use 0 for SSH or 1 for SFTP.")
