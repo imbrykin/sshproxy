@@ -66,13 +66,13 @@ def run_ssh_session(user: str, host: str, port: int):
                     command = buffer.strip()
                     buffer = ""
                     if command:
-                        log_command(command, initiator, user, host, port, session_id, pid, commands_file)
+                        log_command(command, initiator, user, host, port, session_id, pid, log_file, commands_file)
     finally:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         proc.close(force=True)
 
 
-def log_command(raw: str, initiator, target_user, target_host, target_port, session_id, pid, commands_file):
+def log_command(raw: str, initiator, target_user, target_host, target_port, session_id, pid, log_file, commands_file):
     cleaned = raw.replace("\x1b", "").strip()
     if cleaned:
         event = {
@@ -82,6 +82,7 @@ def log_command(raw: str, initiator, target_user, target_host, target_port, sess
             "target_host": target_host,
             "target_port": target_port,
             "session_id": session_id,
+            "log_file": log_file,
             "pid": pid,
             "action": "ssh_command",
             "command": cleaned
