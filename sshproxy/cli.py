@@ -23,7 +23,7 @@ def conn(
 
     # Log hostname to /etc/sshproxy/hostnames.txt with current PID and timestamp
     try:
-        hostname_log = "/etc/sshproxy/hostnames.txt"
+        hostname_log = "/var/log/ssh-proxy/hostnames.txt"
         pid = os.getpid()
         timestamp = datetime.utcnow().isoformat()
         with open(hostname_log, "a") as f:
@@ -41,7 +41,7 @@ def cleanup():
     typer.echo(f"[INFO] Found {len(used_ports)} valid port entries")
 
     # Clean hostnames.txt (older than 1 hour)
-    host_file = "/etc/sshproxy/hostnames.txt"
+    host_file = "/var/log/ssh-proxy/hostnames.txt"
     if os.path.exists(host_file):
         threshold = datetime.utcnow() - timedelta(hours=1)
         valid_lines = []
@@ -152,7 +152,7 @@ def kill_host_sessions(host: str = typer.Argument(..., help="Hostname whose sess
     """
     Kill all active proxy sessions for a specific host.
     """
-    host_file = "/etc/sshproxy/hostnames.txt"
+    host_file = "/var/log/ssh-proxy/hostnames.txt"
     if not os.path.exists(host_file):
         typer.echo("No hostname session mapping available.")
         raise typer.Exit(1)
