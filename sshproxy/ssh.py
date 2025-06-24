@@ -63,7 +63,8 @@ def run_ssh_session(user: str, host: str, port: int):
 
 def parse_and_append_json(log_file: str, initiator: str, target_user: str, target_host: str, session_id: str):
     commands_file = "/var/log/ssh-proxy/loki_commands.json"
-    command_regex = re.compile(rf"^\[{re.escape(target_user)}@.*?\]\s+\$\s+(.*)$")
+    #command_regex = re.compile(rf"^\[{re.escape(target_user)}@.*?\]\s+\$\s+(.*)$")
+    command_regex = re.compile(r"\[\w+@[\w\-.]+\s+[^\]]*\]\s+\$\s+(.*)")
 
     try:
         with open(log_file, "r") as f:
@@ -75,6 +76,7 @@ def parse_and_append_json(log_file: str, initiator: str, target_user: str, targe
     try:
         with open(commands_file, "a") as outf:
             for line in lines:
+                logger.debug("Line from log: %r", line)  # покажет всю строку, включая \x1b и прочее
                 match = command_regex.match(line)
                 if match:
                     command = match.group(1).strip()
