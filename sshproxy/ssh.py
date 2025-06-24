@@ -6,10 +6,7 @@ import termios
 import tty
 import select
 from datetime import datetime
-from dotenv import load_dotenv
 from ptyprocess import PtyProcessUnicode
-
-load_dotenv()
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
