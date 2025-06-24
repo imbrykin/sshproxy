@@ -1,6 +1,10 @@
 import os
 import json
 import logging
+import sys
+import termios
+import tty
+import select
 from datetime import datetime
 from ptyprocess import PtyProcessUnicode
 
@@ -34,22 +38,38 @@ def run_ssh_session(user: str, host: str, port: int):
 
     proc = PtyProcessUnicode.spawn(ssh_cmd)
     buffer = ""
+
+    # Сохраняем оригинальные настройки терминала
+    old_settings = termios.tcgetattr(sys.stdin)
+    tty.setraw(sys.stdin.fileno())  # Переводим терминал в raw-режим
+
     try:
         while proc.isalive():
-            try:
-                data = proc.read(1024)
-                print(data, end="")
-                buffer += data
+            rlist, _, _ = select.select([proc.fd, sys.stdin], [], [], 0.1)
 
-                while "\n" in buffer:
-                    line, buffer = buffer.split("\n", 1)
-                    stripped = line.strip()
-                    if stripped and not stripped.endswith(":"):
-                        log_command(stripped, initiator, user, host, port, session_id, pid, commands_file)
-            except EOFError:
-                break
-    except KeyboardInterrupt:
-        proc.terminate(force=True)
+            if sys.stdin in rlist:
+                user_input = os.read(sys.stdin.fileno(), 1024).decode()
+                proc.write(user_input)
+
+            if proc.fd in rlist:
+                try:
+                    data = proc.read(1024)
+                    if data:
+                        sys.stdout.write(data)
+                        sys.stdout.flush()
+                        buffer += data
+
+                        while "\n" in buffer:
+                            line, buffer = buffer.split("\n", 1)
+                            stripped = line.strip()
+                            if stripped and not stripped.endswith(":"):
+                                log_command(stripped, initiator, user, host, port, session_id, pid, commands_file)
+                except EOFError:
+                    break
+    finally:
+        # Восстанавливаем настройки терминала
+        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+        proc.close(force=True)
 
 
 def log_command(raw: str, initiator, target_user, target_host, target_port, session_id, pid, commands_file):
