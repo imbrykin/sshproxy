@@ -17,9 +17,6 @@ def run_ssh_session(user: str, host: str, port: int):
     log_file_name = os.getenv("LOG_FILE", "sshproxy_events.json")
     commands_file = os.path.join(log_dir, log_file_name)
 
-    # отладочный вывод, временно
-    print(f"[DEBUG] keyfile={keyfile}, log_dir={log_dir}, commands_file={commands_file}")
-
     ssh_cmd = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
 
     initiator = os.getenv("SUDO_USER") or os.getlogin()
