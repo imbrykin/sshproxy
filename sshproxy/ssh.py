@@ -3,6 +3,8 @@ import subprocess
 import logging
 import json
 import re
+import threading
+import time
 from datetime import datetime
 from sshproxy.ports import get_free_port, log_assigned_port
 
@@ -34,6 +36,7 @@ def run_ssh_session(user: str, host: str, port: int):
 
     full_cmd = ["script", "-q", "-f", log_file, "-c", " ".join(ssh_cmd)]
 
+    # JSON-событие начала сессии
     json_event = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "initiator": initiator,
@@ -56,22 +59,21 @@ def run_ssh_session(user: str, host: str, port: int):
     logger.info("Starting SSH session to %s@%s:%d", user, host, port)
     logger.info("Session log: %s", log_file)
 
+    # ▶️ Запускаем фоновый поток для разбора логов в реальном времени
+    threading.Thread(
+        target=live_parse,
+        args=(log_file, initiator, user, host, session_filename, port),
+        daemon=True
+    ).start()
+
+    # ▶️ Запуск SSH через script
     try:
         subprocess.run(full_cmd)
     except Exception as e:
         logger.exception("Failed to start SSH session via script: %s", e)
 
-    parse_and_append_json(
-        log_file=log_file,
-        initiator=initiator,
-        target_user=user,
-        target_host=host,
-        session_id=session_filename,
-        target_port=port
-    )
 
-
-def parse_and_append_json(
+def live_parse(
     log_file: str,
     initiator: str,
     target_user: str,
@@ -79,23 +81,24 @@ def parse_and_append_json(
     session_id: str,
     target_port: int
 ):
-    logger = logging.getLogger(__name__)
-    commands_file = "/var/log/ssh-proxy/loki_commands.json"
-
     command_regex = re.compile(r"\[\s*(?P<user>\w+)@\S+.*?\]\s*[#$]\s+(.*)")
+    commands_file = "/var/log/ssh-proxy/loki_commands.json"
+    seen = set()
 
     try:
         with open(log_file, "r", encoding="utf-8", errors="ignore") as f:
-            lines = f.readlines()
-    except Exception as e:
-        logger.warning("Failed to read log file for command parsing: %s", e)
-        return
+            f.seek(0, os.SEEK_END)
 
-    try:
-        with open(commands_file, "a", encoding="utf-8") as outf:
-            for line in lines:
+            while True:
+                line = f.readline()
+                if not line:
+                    time.sleep(0.1)
+                    continue
+
                 line_stripped = line.strip()
-                logger.debug(f"[parse] Checking line: {repr(line_stripped)}")
+                if line_stripped in seen or not line_stripped:
+                    continue
+                seen.add(line_stripped)
 
                 match = command_regex.search(line_stripped)
                 if match:
@@ -113,7 +116,8 @@ def parse_and_append_json(
                             "action": "ssh_command",
                             "command": command
                         }
-                        outf.write(json.dumps(event) + "\n")
-                        logger.debug(f"[parse] Logged command: {command}")
+                        with open(commands_file, "a", encoding="utf-8") as outf:
+                            outf.write(json.dumps(event) + "\n")
+                        logger.debug(f"[live_parse] Logged command: {command}")
     except Exception as e:
-        logger.warning("Failed to write commands to JSON log: %s", e)
+        logger.warning("Live parsing failed: %s", e)
