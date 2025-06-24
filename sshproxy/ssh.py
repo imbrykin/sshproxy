@@ -23,7 +23,7 @@ def run_ssh_session(user: str, host: str, port: int):
     commands_file = "/var/log/ssh-proxy/loki_commands.json"
     os.makedirs("/var/log/ssh-proxy", exist_ok=True)
 
-    event = {
+    session_start_event = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "initiator": initiator,
         "target_user": user,
@@ -33,8 +33,9 @@ def run_ssh_session(user: str, host: str, port: int):
         "pid": pid,
         "action": "ssh_session_start"
     }
+
     with open("/var/log/ssh-proxy/loki_events.json", "a") as f:
-        f.write(json.dumps(event) + "\n")
+        f.write(json.dumps(session_start_event) + "\n")
 
     proc = PtyProcessUnicode.spawn(ssh_cmd)
     input_buffer = ""
@@ -52,8 +53,8 @@ def run_ssh_session(user: str, host: str, port: int):
                 input_buffer += user_input
 
                 if '\n' in user_input:
-                    command = input_buffer.strip()
-                    if command:
+                    command = input_buffer.strip().split('\n')[-1]
+                    if is_real_command(command):
                         log_command(command, initiator, user, host, port, session_id, pid, commands_file)
                     input_buffer = ""
 
@@ -62,10 +63,19 @@ def run_ssh_session(user: str, host: str, port: int):
                 if output:
                     sys.stdout.write(output)
                     sys.stdout.flush()
-
     finally:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         proc.close(force=True)
+
+def is_real_command(cmd: str) -> bool:
+    cmd = cmd.strip()
+    if not cmd:
+        return False
+    ignore = [
+        "Last login", "Connection to", "logout",
+        "[?2004h", "[?2004l", "\x07", "\x1b"
+    ]
+    return not any(x in cmd for x in ignore)
 
 def log_command(raw: str, initiator, target_user, target_host, target_port, session_id, pid, commands_file):
     cleaned = raw.replace("\x1b", "").strip()
@@ -83,7 +93,6 @@ def log_command(raw: str, initiator, target_user, target_host, target_port, sess
         }
         with open(commands_file, "a") as f:
             f.write(json.dumps(event) + "\n")
-
 
 if __name__ == "__main__":
     import argparse
