@@ -20,20 +20,21 @@ def run_ssh_session(user: str, host: str, port: int):
 
     initiator = os.getenv("SUDO_USER") or os.getlogin()
 
-    # Пишем первую строку вручную
+    # Временный файл с заголовком
+    header_file = f"/tmp/sshproxy_header_{pid}.txt"
     try:
-        with open(log_file, "w") as f:
+        with open(header_file, "w") as f:
             f.write(f"Script started on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S+00:00')} by {initiator}\n")
     except Exception as e:
-        logger.warning("Failed to write script header: %s", e)
+        logger.warning("Failed to write header: %s", e)
 
-    # Команда через script для логирования всей сессии (в режим append)
-    full_cmd = ["script", "-q", "-a", log_file, "-c", " ".join(ssh_cmd)]
+    script_log_tmp = f"/tmp/sshproxy_session_{pid}.tmp"
+    full_cmd = ["script", "-q", "-f", script_log_tmp, "-c", " ".join(ssh_cmd)]
 
     logger.info("Starting SSH session to %s@%s:%d", user, host, port)
     logger.info("Session log: %s", log_file)
 
-    # Логирование hostname mapping
+    # Запись mapping
     hostname_log = "/var/log/ssh-proxy/hostnames.txt"
     try:
         with open(hostname_log, "a") as f:
@@ -43,5 +44,13 @@ def run_ssh_session(user: str, host: str, port: int):
 
     try:
         subprocess.run(full_cmd)
+        # Объединяем header и лог
+        with open(log_file, "wb") as final_log:
+            with open(header_file, "rb") as h, open(script_log_tmp, "rb") as s:
+                final_log.write(h.read())
+                final_log.write(s.read())
     except Exception as e:
         logger.exception("Failed to start SSH session via script: %s", e)
+    finally:
+        os.remove(header_file)
+        os.remove(script_log_tmp)
