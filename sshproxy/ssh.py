@@ -15,7 +15,8 @@ def run_ssh_session(user: str, host: str, port: int):
     os.makedirs(log_dir, exist_ok=True)
 
     timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    session_filename = f"{user}@{host}_{timestamp}.log"
+    pid = os.getpid()
+    session_filename = f"{user}@{host}_{timestamp}_{pid}.log"
     log_file = os.path.join(log_dir, session_filename)
 
     # Команда через script для логирования всей сессии
@@ -24,11 +25,12 @@ def run_ssh_session(user: str, host: str, port: int):
     logger.info("Starting SSH session to %s@%s:%d", user, host, port)
     logger.info("Session log: %s", log_file)
 
-    # Логирование hostname mapping
+    # Логирование hostname mapping с указанием инициатора
     hostname_log = "/var/log/ssh-proxy/hostnames.txt"
+    initiator = os.getenv("SUDO_USER") or os.getlogin()
     try:
         with open(hostname_log, "a") as f:
-            f.write(f"{datetime.utcnow().isoformat()}Z | {user}@{host}:{port} -> {session_filename}\n")
+            f.write(f"{datetime.utcnow().isoformat()}Z | {initiator} -> {user}@{host}:{port} => {session_filename}\n")
     except Exception as e:
         logger.warning("Failed to log hostname mapping: %s", e)
 
