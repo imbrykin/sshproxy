@@ -67,13 +67,14 @@ def run_ssh_session(user: str, host: str, port: int):
 
 def live_parse(log_file, initiator, target_user, target_host, session_id, target_port, pid):
     commands_file = "/var/log/ssh-proxy/loki_commands.json"
-    command_regex = re.compile(r"^\[(?P<user>\w+)@\S+.*?\]\s?[#$]\s?(.*)$")
+    command_regex = re.compile(r"^\[.*@.*\][\$#]\s*(.*)")
 
     logger.info("[live_parse] Waiting for log file: %s", log_file)
     while not os.path.exists(log_file):
         time.sleep(0.1)
 
     logger.info("[live_parse] Start reading: %s", log_file)
+
 
     try:
         with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
