@@ -10,7 +10,6 @@ def run_ssh_session(user: str, host: str, port: int):
     keyfile = "/etc/sshproxy/proxy_keys/external_key1"
     ssh_cmd = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
 
-    # Путь к лог-файлу
     log_dir = "/var/log/ssh-proxy/sessions"
     os.makedirs(log_dir, exist_ok=True)
 
@@ -19,15 +18,23 @@ def run_ssh_session(user: str, host: str, port: int):
     session_filename = f"{user}@{host}_{timestamp}_{pid}.log"
     log_file = os.path.join(log_dir, session_filename)
 
-    # Команда через script для логирования всей сессии
-    full_cmd = ["script", "-q", "-f", log_file, "-c", " ".join(ssh_cmd)]
+    initiator = os.getenv("SUDO_USER") or os.getlogin()
+
+    # Пишем первую строку вручную
+    try:
+        with open(log_file, "w") as f:
+            f.write(f"Script started on {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S+00:00')} by {initiator}\n")
+    except Exception as e:
+        logger.warning("Failed to write script header: %s", e)
+
+    # Команда через script для логирования всей сессии (в режим append)
+    full_cmd = ["script", "-q", "-a", log_file, "-c", " ".join(ssh_cmd)]
 
     logger.info("Starting SSH session to %s@%s:%d", user, host, port)
     logger.info("Session log: %s", log_file)
 
-    # Логирование hostname mapping с указанием инициатора
+    # Логирование hostname mapping
     hostname_log = "/var/log/ssh-proxy/hostnames.txt"
-    initiator = os.getenv("SUDO_USER") or os.getlogin()
     try:
         with open(hostname_log, "a") as f:
             f.write(f"{datetime.utcnow().isoformat()}Z | {initiator} -> {user}@{host}:{port} => {session_filename}\n")
