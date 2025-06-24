@@ -76,35 +76,40 @@ def run_ssh_session(user: str, host: str, port: int):
 
 
 def log_command(raw: str, initiator, target_user, target_host, target_port, session_id, pid, commands_file):
-    cleaned = ansi_escape.sub('', raw)
-    cleaned = shell_prompt_prefix.sub('', cleaned)
-    cleaned = decorations.sub('', cleaned)
+    # Удаляем ANSI-последовательности, управляющие символы, BEL, ESC, etc.
+    cleaned = re.sub(r'\x1b\[[0-9;]*[A-Za-z]', '', raw)   # ANSI sequences
+    cleaned = re.sub(r'\x1b.*?\x07', '', cleaned)         # OSC (title set etc.)
+    cleaned = re.sub(r'[\x00-\x1F\x7F]', '', cleaned)     # control chars (BEL, BS, etc.)
+
     cleaned = cleaned.strip()
 
-    # Отсекаем шум и служебный вывод
-    if not cleaned:
-        return
-    if any(substr in cleaned for substr in [
-        "Last login", "Connection to", "closed.", "logout", "Permission denied"
-    ]):
-        return
-    if cleaned.endswith("~]$") or cleaned.startswith("[") or cleaned.startswith("total "):
-        return
+    # Простой фильтр: игнорируем системные строки и вывод
+    ignore_patterns = [
+        r'^Last login',
+        r'^Connection to .* closed',
+        r'^logout$',
+        r'^\[.*@.*\s~\]\$.*$',  # prompt
+        r'^\s*$',               # пустые строки
+        r'^\-r.+'               # строки из ls/ll вывода
+    ]
+    for pattern in ignore_patterns:
+        if re.match(pattern, cleaned):
+            return
 
-    event = {
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "initiator": initiator,
-        "target_user": target_user,
-        "target_host": target_host,
-        "target_port": target_port,
-        "session_id": session_id,
-        "pid": pid,
-        "action": "ssh_command",
-        "command": cleaned
-    }
-    with open(commands_file, "a") as f:
-        f.write(json.dumps(event) + "\n")
-
+    if cleaned:
+        event = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "initiator": initiator,
+            "target_user": target_user,
+            "target_host": target_host,
+            "target_port": target_port,
+            "session_id": session_id,
+            "pid": pid,
+            "action": "ssh_command",
+            "command": cleaned
+        }
+        with open(commands_file, "a") as f:
+            f.write(json.dumps(event) + "\n")
 
 if __name__ == "__main__":
     import argparse
