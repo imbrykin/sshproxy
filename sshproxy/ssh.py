@@ -103,7 +103,11 @@ def run_ssh_session(user: str, host: str, port: int):
                     elif ch == '\r':  # Enter
                         command = buffer.strip()
                         buffer = ''
-                        if command and any(c.isalnum() for c in command):
+                        if (
+                            command
+                            and any(c.isalnum() for c in command)
+                            and not command.startswith(":")
+                        ):
                             log_command(command, initiator, user, host, port, pid, commands_file)
 
                             # Если команда — TUI, сбрасываем буфер
