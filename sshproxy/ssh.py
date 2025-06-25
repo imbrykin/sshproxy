@@ -13,15 +13,24 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 def run_ssh_session(user: str, host: str, port: int):
+    import os
+    import json
+    import logging
+    import sys
+    import termios
+    import tty
+    import select
+    import codecs
+    from datetime import datetime
+    from ptyprocess import PtyProcessUnicode
+
     keyfile = os.getenv("KEY_FILE", "/etc/sshproxy/proxy_keys/external_key1")
     log_dir = os.getenv("LOG_DIR", "/var/log/ssh-proxy")
     log_file_name = os.getenv("LOG_FILE", "sshproxy_events.json")
     commands_file = os.path.join(log_dir, log_file_name)
 
     ssh_cmd = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
-
     initiator = os.getenv("SUDO_USER") or os.getlogin()
-    timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
     pid = os.getpid()
 
     os.makedirs(log_dir, exist_ok=True)
@@ -37,7 +46,7 @@ def run_ssh_session(user: str, host: str, port: int):
         "action": "ssh_session_start"
     }
     with open(commands_file, "a") as f:
-        f.write(json.dumps(event) + "\n")
+        f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
     proc = PtyProcessUnicode.spawn(ssh_cmd)
     buffer = ""
@@ -66,38 +75,48 @@ def run_ssh_session(user: str, host: str, port: int):
                     input_buffer += ch_byte
                     try:
                         ch = decoder.decode(input_buffer)
-                        input_buffer = b""  # сбрасываем, если успешно декодировали
+                        input_buffer = b""
                     except UnicodeDecodeError:
-                        continue  # ждём следующий байт, символ ещё не полный
+                        continue
+
+                    if ch == '\x1b':  # Escape — стрелки и прочее
+                        esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
+                        proc.write(ch + esc_seq)
+                        if esc_seq == '[A':
+                            log_command("[↑ command used]", initiator, user, host, port, pid, commands_file)
+                        elif esc_seq == '[B':
+                            log_command("[↓ command used]", initiator, user, host, port, pid, commands_file)
+                        buffer = ''
+                        continue
 
                     proc.write(ch)
 
                     if ch == '\x7f':  # Backspace
                         buffer = buffer[:-1]
-                    elif ch == '\x15':  # Ctrl+U — очистка
+                    elif ch == '\x15':  # Ctrl+U
                         buffer = ''
                     elif ch == '\x03':  # Ctrl+C
                         buffer = ''
                         continue
-                    elif ch == '\x1b':  # возможно escape-последовательность
-                        # читаем следующие 2 байта (стрелки — это \x1b[A, \x1b[B)
-                        esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
-                        proc.write(esc_seq)
-                        if esc_seq == '[A':  # стрелка вверх
-                            log_command("[↑ command used]", initiator, user, host, port, pid, commands_file)
-                        elif esc_seq == '[B':  # стрелка вниз
-                            log_command("[↓ command used]", initiator, user, host, port, pid, commands_file)
-                        continue
+                    elif ch == '\t':  # Tab
+                        buffer += '<TAB>'
+                    elif ch == '\r':  # Enter
+                        command = buffer.strip()
+                        buffer = ''
+                        if command and any(c.isalnum() for c in command):
+                            log_command(command, initiator, user, host, port, pid, commands_file)
+
+                            # Если команда — TUI, сбрасываем буфер
+                            tui_cmds = {"less", "vim", "nano", "top", "htop", "mc"}
+                            first_word = command.split()[0]
+                            if first_word in tui_cmds:
+                                buffer = ''
                     else:
                         buffer += ch
 
-                    if ch == "\r":
-                        command = buffer.strip()
-                        buffer = ""
-                        if command:
-                            log_command(command, initiator, user, host, port, pid, commands_file)
-                except Exception as e:
-                    continue  # не роняем сессию в любом случае
+                except Exception:
+                    continue
+
     finally:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         proc.close(force=True)
