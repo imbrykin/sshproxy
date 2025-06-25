@@ -61,7 +61,7 @@ def run_ssh_session(user: str, host: str, port: int):
                     break
 
             if sys.stdin in rlist:
-                ch = os.read(sys.stdin.fileno(), 1).decode()
+                ch = os.read(sys.stdin.fileno(), 1).decode(errors="replace")
                 proc.write(ch)
                 buffer += ch
 
