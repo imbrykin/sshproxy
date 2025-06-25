@@ -62,13 +62,22 @@ def run_ssh_session(user: str, host: str, port: int):
 
             if sys.stdin in rlist:
                 try:
-                    ch_byte = os.read(sys.stdin.fileno(), 1)
-                    input_buffer += ch_byte
                     try:
                         ch = decoder.decode(input_buffer)
-                        input_buffer = b""  # сбрасываем, если успешно декодировали
+                        input_buffer = b""
                     except UnicodeDecodeError:
-                        continue  # ждём следующий байт, символ ещё не полный
+                        continue
+
+                    if ch == '\x1b':  # Escape — возможно стрелка
+                        esc_seq_bytes = os.read(sys.stdin.fileno(), 2)
+                        esc_seq = esc_seq_bytes.decode(errors="ignore")
+                        proc.write(ch + esc_seq)  # вся escape-последовательность
+                        if esc_seq == '[A':
+                            log_command("[↑ command used]", initiator, user, host, port, pid, commands_file)
+                        elif esc_seq == '[B':
+                            log_command("[↓ command used]", initiator, user, host, port, pid, commands_file)
+                        buffer = ''  # обнуляем ввод, чтобы не загрязнить
+                        continue
 
                     proc.write(ch)
 
@@ -76,18 +85,13 @@ def run_ssh_session(user: str, host: str, port: int):
                         buffer = buffer[:-1]
                     elif ch == '\x15':  # Ctrl+U — очистка
                         buffer = ''
-                    elif ch == '\x03':  # Ctrl+C
+                    elif ch == '\x03':  # Ctrl+C — отмена
                         buffer = ''
-                        continue
-                    elif ch == '\x1b':  # возможно escape-последовательность
-                        # читаем следующие 2 байта (стрелки — это \x1b[A, \x1b[B)
-                        esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
-                        proc.write(esc_seq)
-                        if esc_seq == '[A':  # стрелка вверх
-                            log_command("[↑ command used]", initiator, user, host, port, pid, commands_file)
-                        elif esc_seq == '[B':  # стрелка вниз
-                            log_command("[↓ command used]", initiator, user, host, port, pid, commands_file)
-                        continue
+                    elif ch == '\r':  # Enter
+                        command = buffer.strip()
+                        buffer = ''
+                        if command:
+                            log_command(command, initiator, user, host, port, pid, commands_file)
                     else:
                         buffer += ch
 
