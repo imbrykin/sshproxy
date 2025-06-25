@@ -81,9 +81,9 @@ def run_ssh_session(user: str, host: str, port: int):
                         esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
                         proc.write(esc_seq)
                         if esc_seq == '[A':  # стрелка вверх
-                            log_command("↑ command used", initiator, user, host, port, pid, commands_file)
+                            log_command("[↑ command used]", initiator, user, host, port, pid, commands_file)
                         elif esc_seq == '[B':  # стрелка вниз
-                            log_command("↓ command used", initiator, user, host, port, pid, commands_file)
+                            log_command("[↓ command used]", initiator, user, host, port, pid, commands_file)
                         continue
                     else:
                         buffer += ch
