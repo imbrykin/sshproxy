@@ -80,9 +80,10 @@ def run_ssh_session(user: str, host: str, port: int):
                         # читаем следующие 2 байта (стрелки — это \x1b[A, \x1b[B)
                         esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
                         proc.write(esc_seq)
-                        if esc_seq in ['[A', '[B']:
-                            # стрелка вверх или вниз — логируем как недоступную команду из истории
-                            log_command("[history search] — not logged", initiator, user, host, port, pid, commands_file)
+                        if esc_seq == '[A':  # стрелка вверх
+                            log_command("↑ command used", initiator, user, host, port, pid, commands_file)
+                        elif esc_seq == '[B':  # стрелка вниз
+                            log_command("↓ command used", initiator, user, host, port, pid, commands_file)
                         continue
                     else:
                         buffer += ch
