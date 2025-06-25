@@ -6,7 +6,6 @@ import termios
 import tty
 import select
 import codecs
-import time
 from datetime import datetime
 from ptyprocess import PtyProcessUnicode
 
@@ -38,14 +37,16 @@ def run_ssh_session(user: str, host: str, port: int):
         "action": "ssh_session_start"
     }
     with open(commands_file, "a") as f:
-        f.write(json.dumps(event, ensure_ascii=False) + "\n")
+        f.write(json.dumps(event) + "\n")
 
     proc = PtyProcessUnicode.spawn(ssh_cmd)
-    decoder = codecs.getincrementaldecoder("utf-8")()
-    input_buffer = b""
+    buffer = ""
 
     old_settings = termios.tcgetattr(sys.stdin)
     tty.setraw(sys.stdin.fileno())
+
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    input_buffer = b""
 
     try:
         while proc.isalive():
@@ -65,27 +66,25 @@ def run_ssh_session(user: str, host: str, port: int):
                     input_buffer += ch_byte
                     try:
                         ch = decoder.decode(input_buffer)
-                        input_buffer = b""
+                        input_buffer = b""  # сбрасываем, если успешно декодировали
                     except UnicodeDecodeError:
-                        continue
+                        continue  # ждём следующий байт, символ ещё не полный
 
                     proc.write(ch)
+                    if ch == '\x7f':  # Backspace
+                        buffer = buffer[:-1]
+                    elif ch == '\x15':  # Ctrl+U — удалить всю строку
+                        buffer = ''
+                    else:
+                        buffer += ch
 
-                    if ch == "\r":  # Enter pressed
-                        # Дать bash отобразить введённую команду
-                        time.sleep(0.05)
-                        try:
-                            line = proc.read(1024)
-                            sys.stdout.write(line)
-                            sys.stdout.flush()
-                            last_line = line.strip().split("\n")[-1].strip()
-                            if last_line:
-                                log_command(last_line, initiator, user, host, port, pid, commands_file)
-                        except Exception:
-                            pass
-
-                except Exception:
-                    continue
+                    if ch == "\r":  # Enter
+                        command = buffer.strip()
+                        buffer = ""
+                        if command:
+                            log_command(command, initiator, user, host, port, pid, commands_file)
+                except Exception as e:
+                    continue  # не роняем сессию в любом случае
     finally:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         proc.close(force=True)
@@ -104,7 +103,9 @@ def log_command(raw: str, initiator, target_user, target_host, target_port, pid,
             "command": cleaned
         }
         with open(commands_file, "a") as f:
+            #f.write(json.dumps(event) + "\n")
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
 
 if __name__ == "__main__":
     import argparse
