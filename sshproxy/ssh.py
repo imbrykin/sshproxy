@@ -71,14 +71,23 @@ def run_ssh_session(user: str, host: str, port: int):
                         continue  # ждём следующий байт, символ ещё не полный
 
                     proc.write(ch)
+
                     if ch == '\x7f':  # Backspace
                         buffer = buffer[:-1]
-                    elif ch == '\x15':  # Ctrl+U — удалить всю строку
+                    elif ch == '\x15':  # Ctrl+U — очистка
                         buffer = ''
+                    elif ch == '\x1b':  # возможно escape-последовательность
+                        # читаем следующие 2 байта (стрелки — это \x1b[A, \x1b[B)
+                        esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
+                        proc.write(esc_seq)
+                        if esc_seq in ['[A', '[B']:
+                            # стрелка вверх или вниз — логируем как недоступную команду из истории
+                            log_command("[history search] — not logged", initiator, user, host, port, pid, commands_file)
+                        continue
                     else:
                         buffer += ch
 
-                    if ch == "\r":  # Enter
+                    if ch == "\r":
                         command = buffer.strip()
                         buffer = ""
                         if command:
