@@ -104,7 +104,8 @@ def log_command(raw: str, initiator, target_user, target_host, target_port, sess
             "command": cleaned
         }
         with open(commands_file, "a") as f:
-            f.write(json.dumps(event) + "\n")
+            #f.write(json.dumps(event) + "\n")
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 
 if __name__ == "__main__":
