@@ -76,6 +76,9 @@ def run_ssh_session(user: str, host: str, port: int):
                         buffer = buffer[:-1]
                     elif ch == '\x15':  # Ctrl+U — очистка
                         buffer = ''
+                    elif ch == '\x03':  # Ctrl+C
+                        buffer = ''
+                        continue
                     elif ch == '\x1b':  # возможно escape-последовательность
                         # читаем следующие 2 байта (стрелки — это \x1b[A, \x1b[B)
                         esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
