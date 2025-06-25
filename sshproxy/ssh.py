@@ -5,6 +5,7 @@ import sys
 import termios
 import tty
 import select
+import codecs
 from datetime import datetime
 from ptyprocess import PtyProcessUnicode
 
@@ -48,6 +49,9 @@ def run_ssh_session(user: str, host: str, port: int):
     old_settings = termios.tcgetattr(sys.stdin)
     tty.setraw(sys.stdin.fileno())
 
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    input_buffer = b""
+
     try:
         while proc.isalive():
             rlist, _, _ = select.select([proc.fd, sys.stdin], [], [], 0.1)
@@ -61,19 +65,28 @@ def run_ssh_session(user: str, host: str, port: int):
                     break
 
             if sys.stdin in rlist:
-                ch = os.read(sys.stdin.fileno(), 1).decode(errors="replace")
-                proc.write(ch)
-                buffer += ch
+                try:
+                    ch_byte = os.read(sys.stdin.fileno(), 1)
+                    input_buffer += ch_byte
+                    try:
+                        ch = decoder.decode(input_buffer)
+                        input_buffer = b""  # сбрасываем, если успешно декодировали
+                    except UnicodeDecodeError:
+                        continue  # ждём следующий байт, символ ещё не полный
 
-                if ch == "\r":  # Enter
-                    command = buffer.strip()
-                    buffer = ""
-                    if command:
-                        log_command(command, initiator, user, host, port, session_id, pid, log_file, commands_file)
+                    proc.write(ch)
+                    buffer += ch
+
+                    if ch == "\r":  # Enter
+                        command = buffer.strip()
+                        buffer = ""
+                        if command:
+                            log_command(command, initiator, user, host, port, session_id, pid, log_file, commands_file)
+                except Exception as e:
+                    continue  # не роняем сессию в любом случае
     finally:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         proc.close(force=True)
-
 
 def log_command(raw: str, initiator, target_user, target_host, target_port, session_id, pid, log_file, commands_file):
     cleaned = raw.replace("\x1b", "").strip()
