@@ -71,7 +71,12 @@ def run_ssh_session(user: str, host: str, port: int):
                         continue  # ждём следующий байт, символ ещё не полный
 
                     proc.write(ch)
-                    buffer += ch
+                    if ch == '\x7f':  # Backspace
+                        buffer = buffer[:-1]
+                    elif ch == '\x15':  # Ctrl+U — удалить всю строку
+                        buffer = ''
+                    else:
+                        buffer += ch
 
                     if ch == "\r":  # Enter
                         command = buffer.strip()
