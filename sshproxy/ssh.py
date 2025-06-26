@@ -40,6 +40,7 @@ def run_ssh_session(user: str, host: str, port: int):
     buffer = ""
     arrow_state = None
     arrow_count = 0
+    arrow_log_buffer = []
 
     old_settings = termios.tcgetattr(sys.stdin)
     tty.setraw(sys.stdin.fileno())
@@ -74,18 +75,21 @@ def run_ssh_session(user: str, host: str, port: int):
                         proc.write(ch + esc_seq)
                         if esc_seq in ('[A', '[B'):
                             arrow = '↑' if esc_seq == '[A' else '↓'
-                            if arrow_state and arrow_state != arrow:
-                                log_command(f"[{arrow} x{arrow_count}]", initiator, user, host, port, pid, commands_file)
-                                arrow_count = 1
-                                arrow_state = arrow
-                            else:
-                                arrow_state = arrow
+                            if arrow_state == arrow:
                                 arrow_count += 1
+                            else:
+                                if arrow_state:
+                                    arrow_log_buffer.append((arrow_state, arrow_count))
+                                arrow_state = arrow
+                                arrow_count = 1
                         buffer = ''
                         continue
                     else:
                         if arrow_state:
-                            log_command(f"[{arrow_state} x{arrow_count}]", initiator, user, host, port, pid, commands_file)
+                            arrow_log_buffer.append((arrow_state, arrow_count))
+                            for direction, count in arrow_log_buffer:
+                                log_command(f"[{direction} x{count}]", initiator, user, host, port, pid, commands_file)
+                            arrow_log_buffer.clear()
                             arrow_state = None
                             arrow_count = 0
 
@@ -113,7 +117,9 @@ def run_ssh_session(user: str, host: str, port: int):
 
     finally:
         if arrow_state:
-            log_command(f"[{arrow_state} x{arrow_count}]", initiator, user, host, port, pid, commands_file)
+            arrow_log_buffer.append((arrow_state, arrow_count))
+        for direction, count in arrow_log_buffer:
+            log_command(f"[{direction} x{count}]", initiator, user, host, port, pid, commands_file)
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         proc.close(force=True)
 
