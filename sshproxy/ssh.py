@@ -6,7 +6,6 @@ import termios
 import tty
 import select
 import codecs
-import re
 from datetime import datetime
 from ptyprocess import PtyProcessUnicode
 
@@ -14,6 +13,17 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 def run_ssh_session(user: str, host: str, port: int):
+    import os
+    import json
+    import logging
+    import sys
+    import termios
+    import tty
+    import select
+    import codecs
+    from datetime import datetime
+    from ptyprocess import PtyProcessUnicode
+
     keyfile = os.getenv("KEY_FILE", "/etc/sshproxy/proxy_keys/external_key1")
     log_dir = os.getenv("LOG_DIR", "/var/log/ssh-proxy")
     log_file_name = os.getenv("LOG_FILE", "sshproxy_events.json")
@@ -40,8 +50,6 @@ def run_ssh_session(user: str, host: str, port: int):
 
     proc = PtyProcessUnicode.spawn(ssh_cmd)
     buffer = ""
-    screen_output = ""
-    last_logged_command = ""
 
     old_settings = termios.tcgetattr(sys.stdin)
     tty.setraw(sys.stdin.fileno())
@@ -58,24 +66,6 @@ def run_ssh_session(user: str, host: str, port: int):
                     data = proc.read(1024)
                     sys.stdout.write(data)
                     sys.stdout.flush()
-                    screen_output += data
-
-                    # Если попалась новая строка — анализируем
-                    if '\n' in data:
-                        lines = screen_output.strip().splitlines()
-                        if lines:
-                            last_line = lines[-1]
-                            last_line_clean = re.sub(r'\x1b[^m]*m', '', last_line)  # remove ANSI color codes
-
-                            # Промпты типа $ или #
-                            match = re.search(r'[#$]\s+(.*)', last_line_clean)
-                            if match:
-                                maybe_cmd = match.group(1).strip()
-                                if maybe_cmd and maybe_cmd != last_logged_command:
-                                    log_command(maybe_cmd, initiator, user, host, port, pid, commands_file)
-                                    last_logged_command = maybe_cmd
-                        screen_output = ""
-
                 except EOFError:
                     break
 
@@ -119,8 +109,11 @@ def run_ssh_session(user: str, host: str, port: int):
                             and not command.startswith(":")
                         ):
                             log_command(command, initiator, user, host, port, pid, commands_file)
+
+                            # Если команда — TUI, сбрасываем буфер
                             tui_cmds = {"less", "vim", "nano", "top", "htop", "mc"}
-                            if command.split()[0] in tui_cmds:
+                            first_word = command.split()[0]
+                            if first_word in tui_cmds:
                                 buffer = ''
                     else:
                         buffer += ch
@@ -146,7 +139,9 @@ def log_command(raw: str, initiator, target_user, target_host, target_port, pid,
             "command": cleaned
         }
         with open(commands_file, "a") as f:
+            #f.write(json.dumps(event) + "\n")
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
 
 if __name__ == "__main__":
     import argparse
