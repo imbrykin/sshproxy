@@ -1,41 +1,42 @@
 import subprocess
 import logging
-from typing import Optional
+from sshproxy.config import load_config, get_user_groups
 
 logger = logging.getLogger(__name__)
 
-def check_hbac_access(user: str, service: str) -> bool:
-    """
-    Проверяет, разрешён ли доступ пользователю по HBAC для указанного сервиса (sshd или ftp).
-    Используется sssctl user-checks без Kerberos.
-    """
-    try:
-        result = subprocess.run(
-            ["sssctl", "user-checks", user, "-s", service],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True
-        )
+def check_access(user: str, host: str, service: str = "sshd") -> bool:
+    config = load_config()
+    rules = config.get("access_control", {})
+    user_groups = get_user_groups(user)
 
-        logger.debug("sssctl stdout:\n%s", result.stdout.strip())
-        logger.debug("sssctl stderr:\n%s", result.stderr.strip())
+    logger.debug("User %s belongs to groups: %s", user, user_groups)
 
-        return "pam_acct_mgmt: Success" in result.stderr
+    for group in user_groups:
+        rule_config = rules.get(group)
+        if not rule_config:
+            continue
 
-    except Exception as e:
-        logger.error("Failed HBAC check for user=%s service=%s: %s", user, service, e)
-        return False
+        hbac_rule = rule_config.get("hbac_rule")
+        allowed_services = rule_config.get("allow_services", [])
 
-def check_access(user: str, service: str, rule_config: dict) -> bool:
-    """
-    Основная функция проверки:
-    - берёт имя правила из конфигурации
-    - проверяет, разрешён ли сервис
-    - вызывает sssctl
-    """
-    expected_services = rule_config.get("services", {})
-    if not expected_services.get(service, False):
-        logger.info("Access denied: service '%s' not allowed by config", service)
-        return False
+        if service not in allowed_services:
+            logger.info("Access denied: service '%s' not allowed by config for group '%s'", service, group)
+            continue
 
-    return check_hbac_access(user, service)
+        try:
+            result = subprocess.run(
+                ["sssctl", "user-checks", user, "-s", service],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+            if "pam_acct_mgmt: Success" in result.stderr:
+                logger.info("HBAC access granted via rule '%s' for group '%s'", hbac_rule, group)
+                return True
+            else:
+                logger.info("Group '%s': HBAC rule does not permit service '%s'", group, service)
+        except Exception as e:
+            logger.warning("Error checking HBAC rule for group '%s': %s", group, str(e))
+
+    logger.warning("No HBAC rule permits user %s to use service %s", user, service)
+    return False
