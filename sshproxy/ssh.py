@@ -19,17 +19,8 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
     log_file_name = os.getenv("LOG_FILE", "sshproxy_events.json")
     commands_file = os.path.join(log_dir, log_file_name)
 
-    if mode == 1:
-        ssh_cmd = ["sftp", "-o", f"IdentityFile={keyfile}", "-P", str(port), f"{user}@{host}"]
-    elif mode == 0:
-        ssh_cmd = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
-    else:
-        print("[ERROR] Invalid session mode specified. Use -t 0 (SSH) or -t 1 (SFTP).")
-        sys.exit(1)
-
     initiator = os.getenv("SUDO_USER") or os.getlogin()
     pid = os.getpid()
-
     os.makedirs(log_dir, exist_ok=True)
 
     event = {
@@ -45,6 +36,98 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
     with open(commands_file, "a") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
+    if mode == 1:
+        sftp_cmd = ["sftp", "-o", f"IdentityFile={keyfile}", "-o", f"Port={port}", f"{user}@{host}"]
+        proc = PtyProcessUnicode.spawn(sftp_cmd)
+
+        buffer = ""
+        arrow_state = None
+        arrow_count = 0
+        arrow_log_buffer = []
+
+        old_settings = termios.tcgetattr(sys.stdin)
+        tty.setraw(sys.stdin.fileno())
+
+        decoder = codecs.getincrementaldecoder("utf-8")()
+        input_buffer = b""
+
+        try:
+            while proc.isalive():
+                rlist, _, _ = select.select([proc.fd, sys.stdin], [], [], 0.1)
+
+                if proc.fd in rlist:
+                    try:
+                        data = proc.read(1024)
+                        sys.stdout.write(data)
+                        sys.stdout.flush()
+                    except EOFError:
+                        break
+
+                if sys.stdin in rlist:
+                    try:
+                        ch_byte = os.read(sys.stdin.fileno(), 1)
+                        input_buffer += ch_byte
+                        try:
+                            ch = decoder.decode(input_buffer)
+                            input_buffer = b""
+                        except UnicodeDecodeError:
+                            continue
+
+                        if ch == '\x1b':
+                            esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
+                            proc.write(ch + esc_seq)
+                            if esc_seq in ('[A', '[B'):
+                                arrow = '↑' if esc_seq == '[A' else '↓'
+                                if arrow_state == arrow:
+                                    arrow_count += 1
+                                else:
+                                    if arrow_state:
+                                        arrow_log_buffer.append((arrow_state, arrow_count))
+                                    arrow_state = arrow
+                                    arrow_count = 1
+                            buffer = ''
+                            continue
+                        else:
+                            if arrow_state:
+                                arrow_log_buffer.append((arrow_state, arrow_count))
+                                for direction, count in arrow_log_buffer:
+                                    log_command(f"[{direction} x{count}]", initiator, user, host, port, pid, commands_file, action="sftp_command")
+                                arrow_log_buffer.clear()
+                                arrow_state = None
+                                arrow_count = 0
+
+                        proc.write(ch)
+
+                        if ch == '\x7f':
+                            buffer = buffer[:-1]
+                        elif ch == '\x15':
+                            buffer = ''
+                        elif ch == '\x03':
+                            buffer = ''
+                            continue
+                        elif ch == '\t':
+                            buffer += '<TAB>'
+                        elif ch == '\r':
+                            command = buffer.strip()
+                            buffer = ''
+                            if command:
+                                log_command(command, initiator, user, host, port, pid, commands_file, action="sftp_command")
+                        else:
+                            buffer += ch
+
+                    except Exception:
+                        continue
+        finally:
+            if arrow_state:
+                arrow_log_buffer.append((arrow_state, arrow_count))
+            for direction, count in arrow_log_buffer:
+                log_command(f"[{direction} x{count}]", initiator, user, host, port, pid, commands_file, action="sftp_command")
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+            proc.close(force=True)
+        return
+
+    # Default SSH mode
+    ssh_cmd = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
     proc = PtyProcessUnicode.spawn(ssh_cmd)
     buffer = ""
     arrow_state = None
@@ -79,29 +162,28 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
                     except UnicodeDecodeError:
                         continue
 
-                    if mode == 0:
-                        if ch == '\x1b':
-                            esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
-                            proc.write(ch + esc_seq)
-                            if esc_seq in ('[A', '[B'):
-                                arrow = '↑' if esc_seq == '[A' else '↓'
-                                if arrow_state == arrow:
-                                    arrow_count += 1
-                                else:
-                                    if arrow_state:
-                                        arrow_log_buffer.append((arrow_state, arrow_count))
-                                    arrow_state = arrow
-                                    arrow_count = 1
-                            buffer = ''
-                            continue
-                        else:
-                            if arrow_state:
-                                arrow_log_buffer.append((arrow_state, arrow_count))
-                                for direction, count in arrow_log_buffer:
-                                    log_command(f"[{direction} x{count}]", initiator, user, host, port, pid, commands_file)
-                                arrow_log_buffer.clear()
-                                arrow_state = None
-                                arrow_count = 0
+                    if ch == '\x1b':
+                        esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
+                        proc.write(ch + esc_seq)
+                        if esc_seq in ('[A', '[B'):
+                            arrow = '↑' if esc_seq == '[A' else '↓'
+                            if arrow_state == arrow:
+                                arrow_count += 1
+                            else:
+                                if arrow_state:
+                                    arrow_log_buffer.append((arrow_state, arrow_count))
+                                arrow_state = arrow
+                                arrow_count = 1
+                        buffer = ''
+                        continue
+                    else:
+                        if arrow_state:
+                            arrow_log_buffer.append((arrow_state, arrow_count))
+                            for direction, count in arrow_log_buffer:
+                                log_command(f"[{direction} x{count}]", initiator, user, host, port, pid, commands_file)
+                            arrow_log_buffer.clear()
+                            arrow_state = None
+                            arrow_count = 0
 
                     proc.write(ch)
 
@@ -113,13 +195,12 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
                         buffer = ''
                         continue
                     elif ch == '\t':
-                        buffer += '<TAB>' if mode == 0 else ''
+                        buffer += '<TAB>'
                     elif ch == '\r':
                         command = buffer.strip()
                         buffer = ''
                         if command:
-                            log_command(command, initiator, user, host, port, pid, commands_file,
-                                        action="sftp_command" if mode == 1 else "ssh_command")
+                            log_command(command, initiator, user, host, port, pid, commands_file)
                     else:
                         buffer += ch
 
