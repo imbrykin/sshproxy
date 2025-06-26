@@ -1,7 +1,4 @@
 access_control:
-  support:
-    allow_hosts:
-      - "*.alarislabs.com"
-  devopsoms:
+  sshproxy:
     allow_hosts:
       - "*"
