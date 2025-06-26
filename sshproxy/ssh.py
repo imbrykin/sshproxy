@@ -19,7 +19,7 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
     commands_file = os.path.join(log_dir, log_file_name)
 
     if mode == 1:
-        ssh_cmd = ["sftp", "-i", keyfile, "-P", str(port), f"{user}@{host}"]
+        ssh_cmd = ["sftp", "-o", f"IdentityFile={keyfile}", "-P", str(port), f"{user}@{host}"]
     elif mode == 0:
         ssh_cmd = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
     else:
