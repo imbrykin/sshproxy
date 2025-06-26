@@ -30,7 +30,7 @@ def start_session(host: str, user: str, mode: int, port: int):
     logger.info("Session starting: initiator=%s, target=%s@%s:%d [mode=%d]", caller_user, user, host, port, mode)
 
     if mode == 0:
-        run_ssh_session(user, host, port)
+        run_ssh_session(user, host, port, mode)
     elif mode == 1:
         print("[ERROR] SFTP proxy mode is not implemented.")
         logger.error("Attempted SFTP mode but it's not implemented.")
