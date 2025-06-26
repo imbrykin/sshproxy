@@ -13,16 +13,6 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 def run_ssh_session(user: str, host: str, port: int):
-    import os
-    import json
-    import logging
-    import sys
-    import termios
-    import tty
-    import select
-    import codecs
-    from datetime import datetime
-    from ptyprocess import PtyProcessUnicode
 
     keyfile = os.getenv("KEY_FILE", "/etc/sshproxy/proxy_keys/external_key1")
     log_dir = os.getenv("LOG_DIR", "/var/log/ssh-proxy")
