@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 def run_ssh_session(user: str, host: str, port: int):
-
     keyfile = os.getenv("KEY_FILE", "/etc/sshproxy/proxy_keys/external_key1")
     log_dir = os.getenv("LOG_DIR", "/var/log/ssh-proxy")
     log_file_name = os.getenv("LOG_FILE", "sshproxy_events.json")
@@ -25,7 +24,6 @@ def run_ssh_session(user: str, host: str, port: int):
 
     os.makedirs(log_dir, exist_ok=True)
 
-    # log session start
     event = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "initiator": initiator,
@@ -40,6 +38,8 @@ def run_ssh_session(user: str, host: str, port: int):
 
     proc = PtyProcessUnicode.spawn(ssh_cmd)
     buffer = ""
+    arrow_state = None
+    arrow_count = 0
 
     old_settings = termios.tcgetattr(sys.stdin)
     tty.setraw(sys.stdin.fileno())
@@ -69,42 +69,42 @@ def run_ssh_session(user: str, host: str, port: int):
                     except UnicodeDecodeError:
                         continue
 
-                    if ch == '\x1b':  # Escape — стрелки и прочее
+                    if ch == '\x1b':
                         esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
                         proc.write(ch + esc_seq)
-                        if esc_seq == '[A':
-                            log_command("[↑ command used]", initiator, user, host, port, pid, commands_file)
-                        elif esc_seq == '[B':
-                            log_command("[↓ command used]", initiator, user, host, port, pid, commands_file)
+                        if esc_seq in ('[A', '[B'):
+                            arrow = '↑' if esc_seq == '[A' else '↓'
+                            if arrow_state and arrow_state != arrow:
+                                log_command(f"[{arrow} x{arrow_count}]", initiator, user, host, port, pid, commands_file)
+                                arrow_count = 1
+                                arrow_state = arrow
+                            else:
+                                arrow_state = arrow
+                                arrow_count += 1
                         buffer = ''
                         continue
+                    else:
+                        if arrow_state:
+                            log_command(f"[{arrow_state} x{arrow_count}]", initiator, user, host, port, pid, commands_file)
+                            arrow_state = None
+                            arrow_count = 0
 
                     proc.write(ch)
 
-                    if ch == '\x7f':  # Backspace
+                    if ch == '\x7f':
                         buffer = buffer[:-1]
-                    elif ch == '\x15':  # Ctrl+U
+                    elif ch == '\x15':
                         buffer = ''
-                    elif ch == '\x03':  # Ctrl+C
+                    elif ch == '\x03':
                         buffer = ''
                         continue
-                    elif ch == '\t':  # Tab
+                    elif ch == '\t':
                         buffer += '<TAB>'
-                    elif ch == '\r':  # Enter
+                    elif ch == '\r':
                         command = buffer.strip()
                         buffer = ''
-                        if (
-                            command
-                            and any(c.isalnum() for c in command)
-                            and not command.startswith(":")
-                        ):
+                        if command and any(c.isalnum() for c in command) and not command.startswith(":"):
                             log_command(command, initiator, user, host, port, pid, commands_file)
-
-                            # Если команда — TUI, сбрасываем буфер
-                            tui_cmds = {"less", "vim", "nano", "top", "htop", "mc"}
-                            first_word = command.split()[0]
-                            if first_word in tui_cmds:
-                                buffer = ''
                     else:
                         buffer += ch
 
@@ -112,6 +112,8 @@ def run_ssh_session(user: str, host: str, port: int):
                     continue
 
     finally:
+        if arrow_state:
+            log_command(f"[{arrow_state} x{arrow_count}]", initiator, user, host, port, pid, commands_file)
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         proc.close(force=True)
 
@@ -129,9 +131,7 @@ def log_command(raw: str, initiator, target_user, target_host, target_port, pid,
             "command": cleaned
         }
         with open(commands_file, "a") as f:
-            #f.write(json.dumps(event) + "\n")
             f.write(json.dumps(event, ensure_ascii=False) + "\n")
-
 
 if __name__ == "__main__":
     import argparse
