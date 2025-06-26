@@ -12,13 +12,17 @@ from ptyprocess import PtyProcessUnicode
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-def run_ssh_session(user: str, host: str, port: int):
+def run_ssh_session(user: str, host: str, port: int, mode: int):
     keyfile = os.getenv("KEY_FILE", "/etc/sshproxy/proxy_keys/external_key1")
     log_dir = os.getenv("LOG_DIR", "/var/log/ssh-proxy")
     log_file_name = os.getenv("LOG_FILE", "sshproxy_events.json")
     commands_file = os.path.join(log_dir, log_file_name)
 
-    ssh_cmd = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
+    if mode == 1:
+        ssh_cmd = ["sftp", "-i", keyfile, f"-P", str(port), f"{user}@{host}"]
+    else:
+        ssh_cmd = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
+
     initiator = os.getenv("SUDO_USER") or os.getlogin()
     pid = os.getpid()
 
@@ -31,7 +35,8 @@ def run_ssh_session(user: str, host: str, port: int):
         "target_host": host,
         "target_port": port,
         "pid": pid,
-        "action": "ssh_session_start"
+        "action": "ssh_session_start",
+        "mode": "sftp" if mode == 1 else "ssh"
     }
     with open(commands_file, "a") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
@@ -145,6 +150,7 @@ if __name__ == "__main__":
     parser.add_argument("-u", "--user", required=True)
     parser.add_argument("-h", "--host", required=True)
     parser.add_argument("-p", "--port", type=int, default=22)
+    parser.add_argument("-t", "--type", type=int, default=0, choices=[0, 1], help="0 - SSH, 1 - SFTP")
     args = parser.parse_args()
 
-    run_ssh_session(args.user, args.host, args.port)
+    run_ssh_session(args.user, args.host, args.port, args.type)
