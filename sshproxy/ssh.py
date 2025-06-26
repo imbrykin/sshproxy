@@ -20,8 +20,11 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
 
     if mode == 1:
         ssh_cmd = ["sftp", "-i", keyfile, f"-P", str(port), f"{user}@{host}"]
-    else:
+    elif mode == 0:
         ssh_cmd = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
+    else:
+        print("[ERROR] Invalid session mode specified. Use -t 0 (SSH) or -t 1 (SFTP).")
+        sys.exit(1)
 
     initiator = os.getenv("SUDO_USER") or os.getlogin()
     pid = os.getpid()
@@ -150,7 +153,7 @@ if __name__ == "__main__":
     parser.add_argument("-u", "--user", required=True)
     parser.add_argument("-h", "--host", required=True)
     parser.add_argument("-p", "--port", type=int, default=22)
-    parser.add_argument("-t", "--type", type=int, default=0, choices=[0, 1], help="0 - SSH, 1 - SFTP")
+    parser.add_argument("-t", "--type", type=int, choices=[0, 1], help="0 - SSH, 1 - SFTP", required=True)
     args = parser.parse_args()
 
     run_ssh_session(args.user, args.host, args.port, args.type)
