@@ -38,7 +38,7 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
         "target_host": host,
         "target_port": port,
         "pid": pid,
-        "action": "sftp_session_start" if mode ==1 else "ssh_session_start",
+        "action": "sftp_session_start" if mode == 1 else "ssh_session_start",
         "mode": "sftp" if mode == 1 else "ssh"
     }
     with open(commands_file, "a") as f:
@@ -78,28 +78,29 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
                     except UnicodeDecodeError:
                         continue
 
-                    if ch == '\x1b':
-                        esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
-                        proc.write(ch + esc_seq)
-                        if esc_seq in ('[A', '[B'):
-                            arrow = '↑' if esc_seq == '[A' else '↓'
-                            if arrow_state == arrow:
-                                arrow_count += 1
-                            else:
-                                if arrow_state:
-                                    arrow_log_buffer.append((arrow_state, arrow_count))
-                                arrow_state = arrow
-                                arrow_count = 1
-                        buffer = ''
-                        continue
-                    else:
-                        if arrow_state:
-                            arrow_log_buffer.append((arrow_state, arrow_count))
-                            for direction, count in arrow_log_buffer:
-                                log_command(f"[{direction} x{count}]", initiator, user, host, port, pid, commands_file)
-                            arrow_log_buffer.clear()
-                            arrow_state = None
-                            arrow_count = 0
+                    if mode == 0:
+                        if ch == '\x1b':
+                            esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
+                            proc.write(ch + esc_seq)
+                            if esc_seq in ('[A', '[B'):
+                                arrow = '↑' if esc_seq == '[A' else '↓'
+                                if arrow_state == arrow:
+                                    arrow_count += 1
+                                else:
+                                    if arrow_state:
+                                        arrow_log_buffer.append((arrow_state, arrow_count))
+                                    arrow_state = arrow
+                                    arrow_count = 1
+                            buffer = ''
+                            continue
+                        else:
+                            if arrow_state:
+                                arrow_log_buffer.append((arrow_state, arrow_count))
+                                for direction, count in arrow_log_buffer:
+                                    log_command(f"[{direction} x{count}]", initiator, user, host, port, pid, commands_file)
+                                arrow_log_buffer.clear()
+                                arrow_state = None
+                                arrow_count = 0
 
                     proc.write(ch)
 
@@ -111,12 +112,13 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
                         buffer = ''
                         continue
                     elif ch == '\t':
-                        buffer += '<TAB>'
+                        buffer += '<TAB>' if mode == 0 else ''
                     elif ch == '\r':
                         command = buffer.strip()
                         buffer = ''
-                        if command and any(c.isalnum() for c in command) and not command.startswith(":"):
-                            log_command(command, initiator, user, host, port, pid, commands_file)
+                        if command:
+                            log_command(command, initiator, user, host, port, pid, commands_file,
+                                        action="sftp_command" if mode == 1 else "ssh_command")
                     else:
                         buffer += ch
 
@@ -131,7 +133,7 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         proc.close(force=True)
 
-def log_command(raw: str, initiator, target_user, target_host, target_port, pid, commands_file):
+def log_command(raw: str, initiator, target_user, target_host, target_port, pid, commands_file, action="ssh_command"):
     cleaned = raw.replace("\x1b", "").strip()
     if cleaned:
         event = {
@@ -141,7 +143,7 @@ def log_command(raw: str, initiator, target_user, target_host, target_port, pid,
             "target_host": target_host,
             "target_port": target_port,
             "pid": pid,
-            "action": "ssh_command",
+            "action": action,
             "command": cleaned
         }
         with open(commands_file, "a") as f:
