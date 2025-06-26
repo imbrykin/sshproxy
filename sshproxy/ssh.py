@@ -19,7 +19,7 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
     commands_file = os.path.join(log_dir, log_file_name)
 
     if mode == 1:
-        ssh_cmd = ["sftp", "-i", keyfile, f"-P", str(port), f"{user}@{host}"]
+        ssh_cmd = ["sftp", "-i", keyfile, "-P", str(port), f"{user}@{host}"]
     elif mode == 0:
         ssh_cmd = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
     else:
@@ -152,8 +152,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-u", "--user", required=True)
     parser.add_argument("-h", "--host", required=True)
-    parser.add_argument("-p", "--port", type=int, default=22)
-    parser.add_argument("-t", "--type", type=int, choices=[0, 1], help="0 - SSH, 1 - SFTP", required=True)
+    parser.add_argument("-p", "--port", type=int, required=True)
+    parser.add_argument("-t", "--type", type=int, choices=[0, 1], required=True, help="0 - SSH, 1 - SFTP")
     args = parser.parse_args()
 
     run_ssh_session(args.user, args.host, args.port, args.type)
