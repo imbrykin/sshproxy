@@ -13,8 +13,8 @@ app = typer.Typer()
 def conn(
     h: str = typer.Option(..., "-h", "--host", help="Hostname or IP address"),
     u: str = typer.Option(..., "-u", "--user", help="Username"),
-    t: int = typer.Option(0, "-t", "--type", help="Mode: 0=SSH, 1=SFTP"),
-    p: int = typer.Option(22, "-p", "--port", help="SSH port")
+    t: int = typer.Option(..., "-t", "--type", help="Mode: 0=SSH, 1=SFTP"),
+    p: int = typer.Option(..., "-p", "--port", help="SSH port")
 ):
     """
     Start an SSH or SFTP session using FreeIPA authorization.
