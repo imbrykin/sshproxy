@@ -6,6 +6,7 @@ import termios
 import tty
 import select
 import codecs
+import subprocess
 from datetime import datetime
 from ptyprocess import PtyProcessUnicode
 
