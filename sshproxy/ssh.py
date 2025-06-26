@@ -38,7 +38,7 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
         "target_host": host,
         "target_port": port,
         "pid": pid,
-        "action": "ssh_session_start",
+        "action": "sftp_session_start" if mode ==1 else "ssh_session_start",
         "mode": "sftp" if mode == 1 else "ssh"
     }
     with open(commands_file, "a") as f:
