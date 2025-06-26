@@ -1,12 +1,17 @@
 import subprocess
 import logging
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-def check_access(user: str, host: str) -> bool:
+def check_hbac_access(user: str, service: str) -> bool:
+    """
+    Проверяет, разрешён ли доступ пользователю по HBAC для указанного сервиса (sshd или ftp).
+    Используется sssctl user-checks без Kerberos.
+    """
     try:
         result = subprocess.run(
-            ["sssctl", "user-checks", user, "-s", "sshd"],
+            ["sssctl", "user-checks", user, "-s", service],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             universal_newlines=True
@@ -15,16 +20,22 @@ def check_access(user: str, host: str) -> bool:
         logger.debug("sssctl stdout:\n%s", result.stdout.strip())
         logger.debug("sssctl stderr:\n%s", result.stderr.strip())
 
-        if "pam_acct_mgmt: Success" in result.stderr:
-            logger.info("SSSD access GRANTED for %s@%s", user, host)
-            return True
-        else:
-            logger.warning("SSSD access DENIED for %s@%s", user, host)
-            return False
+        return "pam_acct_mgmt: Success" in result.stderr
 
-    except FileNotFoundError as e:
-        logger.error("Required command not found: %s", e)
-        return False
     except Exception as e:
-        logger.exception("Unexpected error during access check for %s@%s: %s", user, host, e)
+        logger.error("Failed HBAC check for user=%s service=%s: %s", user, service, e)
         return False
+
+def check_access(user: str, service: str, rule_config: dict) -> bool:
+    """
+    Основная функция проверки:
+    - берёт имя правила из конфигурации
+    - проверяет, разрешён ли сервис
+    - вызывает sssctl
+    """
+    expected_services = rule_config.get("services", {})
+    if not expected_services.get(service, False):
+        logger.info("Access denied: service '%s' not allowed by config", service)
+        return False
+
+    return check_hbac_access(user, service)
