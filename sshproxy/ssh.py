@@ -92,10 +92,10 @@ def run_ssh_session(user: str, host: str, port: int):
                     if ch == '\x1b':  # Escape — стрелки и прочее
                         esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
                         proc.write(ch + esc_seq)
-                        # if esc_seq == '[A':
-                        #     log_command("[↑ command used]", initiator, user, host, port, pid, commands_file)
-                        # elif esc_seq == '[B':
-                        #     log_command("[↓ command used]", initiator, user, host, port, pid, commands_file)
+                        if esc_seq == '[A':
+                            log_command("[↑ command used]", initiator, user, host, port, pid, commands_file)
+                        elif esc_seq == '[B':
+                            log_command("[↓ command used]", initiator, user, host, port, pid, commands_file)
                         buffer = ''
                         continue
 
