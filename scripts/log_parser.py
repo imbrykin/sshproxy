@@ -25,6 +25,7 @@ PROCESSED_HASHES = {}
 
 ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 prompt_pattern = re.compile(r'^.*\[(?P<user>[\w.-]+)@(?P<host>[\w.-]+)\s+[~\w/\.-]*\]\$\s*(?P<cmd>.*)$')
+sftp_pattern = re.compile(r'^(get|put|ls|cd|pwd|exit|rename|rm|mkdir|rmdir)\b.*$')
 
 
 def load_hashes():
@@ -70,7 +71,8 @@ def extract_metadata_from_filename(filename):
                 "target_host": parts[2],
                 "pid": os.getpid(),
                 "target_user": "alaris",
-                "target_port": 22
+                "target_port": 22,
+                "mode": "sftp" if "sftp" in parts[2] else "ssh"  # crude hint fallback
             }
     return None
 
@@ -110,27 +112,36 @@ def run_parser():
             for raw_line in lines:
                 line = ansi_escape.sub('', raw_line.strip())
                 logging.debug(f"Checking line: {line}")
-                match = prompt_pattern.match(line)
 
-                if match:
-                    cmd = match.group("cmd").strip()
-                    if cmd:
-                        record = {
-                            "timestamp": datetime.utcnow().isoformat() + "Z",
-                            "initiator": metadata["initiator"],
-                            "target_user": metadata["target_user"],
-                            "target_host": metadata["target_host"],
-                            "target_port": metadata["target_port"],
-                            "pid": metadata["pid"],
-                            "action": "ssh_command",
-                            "command": cmd
-                        }
-                        logging.info(f"Captured command: {cmd}")
-                        try:
-                            with open(OUTPUT_FILE, "a") as out:
-                                out.write(json.dumps(record) + "\n")
-                        except Exception as e:
-                            logging.error(f"Failed to write to output file: {e}")
+                action_type = "ssh_command"
+                cmd = None
+
+                if metadata.get("mode") == "sftp":
+                    if sftp_pattern.match(line):
+                        cmd = line
+                        action_type = "sftp_command"
+                else:
+                    match = prompt_pattern.match(line)
+                    if match:
+                        cmd = match.group("cmd").strip()
+
+                if cmd:
+                    record = {
+                        "timestamp": datetime.utcnow().isoformat() + "Z",
+                        "initiator": metadata["initiator"],
+                        "target_user": metadata["target_user"],
+                        "target_host": metadata["target_host"],
+                        "target_port": metadata["target_port"],
+                        "pid": metadata["pid"],
+                        "action": action_type,
+                        "command": cmd
+                    }
+                    logging.info(f"Captured {action_type}: {cmd}")
+                    try:
+                        with open(OUTPUT_FILE, "a") as out:
+                            out.write(json.dumps(record) + "\n")
+                    except Exception as e:
+                        logging.error(f"Failed to write to output file: {e}")
                 else:
                     logging.debug(f"No match: {line}")
 
