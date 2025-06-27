@@ -74,9 +74,8 @@ def run_parser():
 
             for raw_line in lines:
                 line = ansi_escape.sub('', raw_line.strip())
-                #match = prompt_pattern.match(line)
-                match = prompt_pattern.match(cleaned)
-                
+                match = prompt_pattern.match(line)
+
                 if match:
                     cmd = match.group("cmd").strip()
                     if cmd:
