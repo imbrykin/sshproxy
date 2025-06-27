@@ -29,6 +29,17 @@ ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 prompt_pattern = re.compile(r'^.*\[(?P<user>[\w.-]+)@(?P<host>[\w.-]+)\s+[~\w/\.-]*\]\$\s*(?P<cmd>.*)$')
 sftp_pattern = re.compile(r'^sftp>\s*(?P<cmd>.*)$')
 
+# ANSI backspace handling
+def remove_backspaces(text):
+    result = []
+    for char in text:
+        if char == '\b':
+            if result:
+                result.pop()
+        else:
+            result.append(char)
+    return ''.join(result)
+
 def load_hashes():
     if os.path.exists(HASHES_FILE):
         try:
@@ -125,6 +136,7 @@ def run_parser():
 
             for raw_line in lines:
                 line = ansi_escape.sub('', raw_line.strip())
+                line = remove_backspaces(line)
                 logging.debug(f"Checking line: {line}")
 
                 action_type = "ssh_command"
