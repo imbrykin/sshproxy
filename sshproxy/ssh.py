@@ -85,12 +85,15 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
 
 def extract_commands_from_session_log(log_path, initiator, user, host, port, pid):
     commands = []
-    prompt_pattern = re.compile(r'^\[.*@.*\]\$\s+(.*)')  # [user@host]$ команда
+    prompt_pattern = re.compile(r'^\[.*@.*\]\$\s+(.*)')
+    ansi_escape = re.compile(r'(?:\x1B[@-_][0-?]*[ -/]*[@-~])')
 
     try:
         with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
             for line in f:
-                match = prompt_pattern.match(line.strip())
+                raw = line.strip()
+                cleaned = ansi_escape.sub('', raw)
+                match = prompt_pattern.match(cleaned)
                 if match:
                     cmd = match.group(1).strip()
                     if cmd:
