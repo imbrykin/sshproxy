@@ -25,7 +25,7 @@ PROCESSED_HASHES = {}
 
 ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 prompt_pattern = re.compile(r'^.*\[(?P<user>[\w.-]+)@(?P<host>[\w.-]+)\s+[~\w/\.-]*\]\$\s*(?P<cmd>.*)$')
-sftp_pattern = re.compile(r'^sftp>\s*(?P<cmd>.+)$')
+sftp_pattern = re.compile(r'^sftp>\s*(?P<cmd>.*)$')
 
 def load_hashes():
     if os.path.exists(HASHES_FILE):
