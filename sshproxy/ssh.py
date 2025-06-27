@@ -6,7 +6,6 @@ import codecs
 import select
 import termios
 import tty
-import subprocess
 from datetime import datetime
 from ptyprocess import PtyProcessUnicode
 
@@ -110,18 +109,9 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
                         buffer += '<TAB>'
                     elif ch == '\r':
                         command_str = buffer.strip()
-
-                        # Вытащить предыдущую команду, если buffer пуст
-                        if not command_str:
-                            try:
-                                command_str = proc.before.strip().split('\n')[-1]
-                            except Exception:
-                                command_str = ""
-
-                        buffer = ""
+                        buffer = ''
                         if command_str:
                             log_command(command_str, initiator, user, host, port, pid, commands_file)
-
                     else:
                         buffer += ch
 
@@ -131,11 +121,6 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
     finally:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         proc.close(force=True)
-
-    logged_commands = get_logged_commands(commands_file)
-    history_lines = fetch_bash_history(user, host, keyfile, logged_commands)
-    for line in history_lines:
-        log_command(line.strip(), initiator, user, host, port, pid, commands_file)
 
     # Log session end
     with open(events_file, "a") as f:
@@ -148,31 +133,6 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
             "pid": pid,
             "action": f"{session_type}_session_end"
         }, ensure_ascii=False) + "\n")
-
-def fetch_bash_history(target_user, target_host, keyfile, known_commands):
-    try:
-        result = subprocess.run([
-            "ssh", "-i", keyfile, f"{target_user}@{target_host}",
-            "tail", "-n", "20", "~/.bash_history"
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, universal_newlines=True)
-
-        history_lines = result.stdout.strip().splitlines()
-        return [cmd for cmd in history_lines if cmd and cmd not in known_commands]
-
-    except subprocess.CalledProcessError as e:
-        logger.warning("Failed to fetch bash_history: %s", e)
-        return []
-
-def get_logged_commands(path):
-    if not os.path.exists(path):
-        return set()
-    try:
-        with open(path, "r") as f:
-            return {json.loads(line)["command"] for line in f if "command" in line}
-    except Exception as e:
-        logger.warning("Failed to parse logged commands: %s", e)
-        return set()
-
 
 if __name__ == "__main__":
     import argparse
