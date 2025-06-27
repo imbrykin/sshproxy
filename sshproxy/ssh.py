@@ -77,6 +77,28 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
     with open(events_file, "a") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
+def extract_commands_from_log(session_log_path, events_file, initiator, user, host, port, pid):
+    try:
+        with open(session_log_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                if "$ " in line:
+                    cmd = line.split("$ ", 1)[-1].strip()
+                    if cmd:
+                        event = {
+                            "timestamp": datetime.utcnow().isoformat() + "Z",
+                            "initiator": initiator,
+                            "target_user": user,
+                            "target_host": host,
+                            "target_port": port,
+                            "pid": pid,
+                            "action": "ssh_command",
+                            "command": cmd
+                        }
+                        with open(events_file, "a") as ef:
+                            ef.write(json.dumps(event, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.warning(f"Failed to extract commands from {session_log_path}: {e}")
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
