@@ -9,11 +9,9 @@ OUTPUT_FILE = "/var/log/ssh-proxy/sshproxy_commands.json"
 PROCESSED_LINES = {}
 
 ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-#prompt_pattern = re.compile(r'^\[.*@.*\]\$\s+(.*)')
 prompt_pattern = re.compile(r'^\[(?P<user>[\w.-]+)@(?P<host>[\w.-]+)\s+[^\]]*\]\$\s+(?P<cmd>.+)$')
 
 def extract_metadata_from_filename(filename):
-    # Старый формат:
     if filename.startswith("session_") and "_" in filename:
         parts = filename.replace("session_", "").replace(".log", "").split("_")
         if len(parts) >= 3:
@@ -26,7 +24,6 @@ def extract_metadata_from_filename(filename):
                 "target_port": 22
             }
 
-    # Новый формат:
     match = re.match(r'^(\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}:\d{2})-([\w\.@-]+)-([\w\-\.@]+)@([\w\.-]+)\.log$', filename)
     if match:
         timestamp, initiator, target_user, target_host = match.groups()
@@ -38,18 +35,7 @@ def extract_metadata_from_filename(filename):
             "target_port": 22,
             "pid": os.getpid()
         }
-
     return None
-
-def follow_log_file(path, start_from=0):
-    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-        f.seek(start_from)
-        while True:
-            line = f.readline()
-            if not line:
-                time.sleep(0.5)
-                continue
-            yield line.strip()
 
 def run_parser():
     print("[INFO] Starting SSH log parser...")
@@ -69,7 +55,7 @@ def run_parser():
                     f.seek(PROCESSED_LINES[full_path])
                     lines = f.readlines()
                     PROCESSED_LINES[full_path] = f.tell()
-            except Exception as e:
+            except Exception:
                 continue
 
             for raw_line in lines:
