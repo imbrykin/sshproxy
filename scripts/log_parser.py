@@ -12,18 +12,33 @@ ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 prompt_pattern = re.compile(r'^\[.*@.*\]\$\s+(.*)')
 
 def extract_metadata_from_filename(filename):
-    # Пример: session_2025-06-27T08:58:36.382976_ivan.brykin_academy.alarislabs.com.log
-    parts = filename.replace("session_", "").replace(".log", "").split("_")
-    if len(parts) < 3:
-        return None
-    return {
-        "timestamp": parts[0],
-        "initiator": parts[1],
-        "target_host": parts[2],
-        "pid": os.getpid(),  # Просто чтобы был; можно заменить на что-то более точное
-        "target_user": "alaris",  # Если всегда такой
-        "target_port": 22
-    }
+    # Старый формат:
+    if filename.startswith("session_") and "_" in filename:
+        parts = filename.replace("session_", "").replace(".log", "").split("_")
+        if len(parts) >= 3:
+            return {
+                "timestamp": parts[0],
+                "initiator": parts[1],
+                "target_host": parts[2],
+                "pid": os.getpid(),
+                "target_user": "alaris",
+                "target_port": 22
+            }
+
+    # Новый формат:
+    match = re.match(r'^(\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}:\d{2})-([\w\.@-]+)-([\w\-\.@]+)@([\w\.-]+)\.log$', filename)
+    if match:
+        timestamp, initiator, target_user, target_host = match.groups()
+        return {
+            "timestamp": timestamp.replace(".", "-").replace(":", ""),
+            "initiator": initiator,
+            "target_user": target_user,
+            "target_host": target_host,
+            "target_port": 22,
+            "pid": os.getpid()
+        }
+
+    return None
 
 def follow_log_file(path, start_from=0):
     with open(path, 'r', encoding='utf-8', errors='ignore') as f:
