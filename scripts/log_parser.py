@@ -25,8 +25,7 @@ PROCESSED_HASHES = {}
 
 ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 prompt_pattern = re.compile(r'^.*\[(?P<user>[\w.-]+)@(?P<host>[\w.-]+)\s+[~\w/\.-]*\]\$\s*(?P<cmd>.*)$')
-sftp_pattern = re.compile(r'^sftp>\s*(?P<cmd>[^\s].*)$')
-
+sftp_pattern = re.compile(r'^sftp>\s*(?P<cmd>.+)$')
 
 def load_hashes():
     if os.path.exists(HASHES_FILE):
@@ -37,14 +36,12 @@ def load_hashes():
             logging.error(f"Failed to load hashes: {e}")
     return {}
 
-
 def save_hashes():
     try:
         with open(HASHES_FILE, 'w') as f:
             json.dump(PROCESSED_HASHES, f)
     except Exception as e:
         logging.error(f"Failed to save hashes: {e}")
-
 
 def compute_hash(file_path):
     try:
@@ -60,7 +57,6 @@ def compute_hash(file_path):
         logging.error(f"Failed to compute hash for {file_path}: {e}")
         return None
 
-
 def extract_metadata_from_filename(filename):
     if filename.startswith("session_") and "_" in filename:
         parts = filename.replace("session_", "").replace(".log", "").split("_")
@@ -72,10 +68,9 @@ def extract_metadata_from_filename(filename):
                 "pid": os.getpid(),
                 "target_user": "alaris",
                 "target_port": 22,
-                "mode": "sftp" if "sftp" in parts[2] else "ssh"
+                "mode": "sftp" if "sftp" in parts[2].lower() else "ssh"
             }
     return None
-
 
 def run_parser():
     global PROCESSED_HASHES
@@ -150,7 +145,6 @@ def run_parser():
             save_hashes()
 
         time.sleep(2)
-
 
 if __name__ == "__main__":
     run_parser()
