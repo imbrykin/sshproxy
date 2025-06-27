@@ -9,7 +9,8 @@ OUTPUT_FILE = "/var/log/ssh-proxy/sshproxy_commands.json"
 PROCESSED_LINES = {}
 
 ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-prompt_pattern = re.compile(r'^\[(?P<user>[\w.-]+)@(?P<host>[\w.-]+)\s+[^\]]*\]\$\s+(?P<cmd>.+)$')
+prompt_pattern = re.compile(r'^\[(?P<user>[\w.-]+)@(?P<host>[\w.-]+)\s+[~\w/-]*\]\$\s+(?P<cmd>.+)$')
+
 
 def extract_metadata_from_filename(filename):
     if filename.startswith("session_") and "_" in filename:
@@ -23,19 +24,8 @@ def extract_metadata_from_filename(filename):
                 "target_user": "alaris",
                 "target_port": 22
             }
-
-    match = re.match(r'^(\d{4}\.\d{2}\.\d{2}-\d{2}:\d{2}:\d{2})-([\w\.@-]+)-([\w\-\.@]+)@([\w\.-]+)\.log$', filename)
-    if match:
-        timestamp, initiator, target_user, target_host = match.groups()
-        return {
-            "timestamp": timestamp.replace(".", "-").replace(":", ""),
-            "initiator": initiator,
-            "target_user": target_user,
-            "target_host": target_host,
-            "target_port": 22,
-            "pid": os.getpid()
-        }
     return None
+
 
 def run_parser():
     print("[INFO] Starting SSH log parser...")
@@ -55,7 +45,8 @@ def run_parser():
                     f.seek(PROCESSED_LINES[full_path])
                     lines = f.readlines()
                     PROCESSED_LINES[full_path] = f.tell()
-            except Exception:
+            except Exception as e:
+                print(f"[ERROR] Failed to read {full_path}: {e}")
                 continue
 
             for raw_line in lines:
@@ -75,9 +66,13 @@ def run_parser():
                             "action": "ssh_command",
                             "command": cmd
                         }
-                        with open(OUTPUT_FILE, "a") as out:
-                            out.write(json.dumps(record) + "\n")
+                        try:
+                            with open(OUTPUT_FILE, "a") as out:
+                                out.write(json.dumps(record) + "\n")
+                        except Exception as e:
+                            print(f"[ERROR] Failed to write to output file: {e}")
         time.sleep(1)
+
 
 if __name__ == "__main__":
     run_parser()
