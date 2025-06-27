@@ -3,6 +3,16 @@ import re
 import json
 import time
 from datetime import datetime
+import logging
+
+LOG_FILE = "/var/log/ssh-proxy/parser.log"
+
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
 SESSIONS_DIR = "/var/log/ssh-proxy/sessions"
 OUTPUT_FILE = "/var/log/ssh-proxy/sshproxy_commands.json"
