@@ -3,6 +3,7 @@ import sys
 import json
 import logging
 import subprocess
+import re
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -81,6 +82,32 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
     }
     with open(events_file, "a") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+def extract_commands_from_session_log(log_path, initiator, user, host, port, pid):
+    commands = []
+    prompt_pattern = re.compile(r'^\[.*@.*\]\$\s+(.*)')  # [user@host]$ команда
+
+    try:
+        with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                match = prompt_pattern.match(line.strip())
+                if match:
+                    cmd = match.group(1).strip()
+                    if cmd:
+                        commands.append({
+                            "timestamp": datetime.utcnow().isoformat() + "Z",
+                            "initiator": initiator,
+                            "target_user": user,
+                            "target_host": host,
+                            "target_port": port,
+                            "pid": pid,
+                            "action": "ssh_command",
+                            "command": cmd
+                        })
+    except Exception as e:
+        logger.warning("Failed to extract commands from session log: %s", e)
+
+    return commands
 
 if __name__ == "__main__":
     import argparse
