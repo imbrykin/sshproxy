@@ -128,9 +128,6 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
     for line in history_lines:
         log_command(line.strip(), initiator, user, host, port, pid, commands_file)
 
-    for line in history_lines:
-        log_command(line, initiator, user, host, port, pid, commands_file)
-
     # Log session end
     with open(events_file, "a") as f:
         f.write(json.dumps({
