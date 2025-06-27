@@ -2,10 +2,15 @@ import os
 import re
 import json
 import time
+import hashlib
 from datetime import datetime
 import logging
 
 LOG_FILE = "/var/log/ssh-proxy/parser.log"
+HASHES_FILE = "/var/log/ssh-proxy/session_hashes.json"
+
+with open(LOG_FILE, "w") as log_init:
+    log_init.write("")
 
 logging.basicConfig(
     filename=LOG_FILE,
@@ -16,10 +21,40 @@ logging.basicConfig(
 
 SESSIONS_DIR = "/var/log/ssh-proxy/sessions"
 OUTPUT_FILE = "/var/log/ssh-proxy/sshproxy_commands.json"
-PROCESSED_LINES = {}
+PROCESSED_HASHES = {}
 
 ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 prompt_pattern = re.compile(r'^.*\[(?P<user>[\w.-]+)@(?P<host>[\w.-]+)\s+[~\w/\.-]*\]\$\s*(?P<cmd>.*)$')
+
+
+def load_hashes():
+    if os.path.exists(HASHES_FILE):
+        try:
+            with open(HASHES_FILE, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            logging.error(f"Failed to load hashes: {e}")
+    return {}
+
+
+def save_hashes():
+    try:
+        with open(HASHES_FILE, 'w') as f:
+            json.dump(PROCESSED_HASHES, f)
+    except Exception as e:
+        logging.error(f"Failed to save hashes: {e}")
+
+
+def compute_hash(file_path):
+    try:
+        hasher = hashlib.md5()
+        with open(file_path, 'rb') as f:
+            while chunk := f.read(8192):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+    except Exception as e:
+        logging.error(f"Failed to compute hash for {file_path}: {e}")
+        return None
 
 
 def extract_metadata_from_filename(filename):
@@ -38,28 +73,33 @@ def extract_metadata_from_filename(filename):
 
 
 def run_parser():
+    global PROCESSED_HASHES
     logging.info("Starting SSH log parser...")
+    PROCESSED_HASHES = load_hashes()
+
     while True:
         logging.debug("Scanning for log files...")
         log_files = [f for f in os.listdir(SESSIONS_DIR) if f.startswith("session_") and f.endswith(".log")]
+
         for fname in log_files:
             full_path = os.path.join(SESSIONS_DIR, fname)
-            logging.debug(f"Processing file: {full_path}")
+            file_hash = compute_hash(full_path)
+
+            if not file_hash:
+                continue
+            if PROCESSED_HASHES.get(fname) == file_hash:
+                logging.debug(f"No changes in file: {fname}")
+                continue
 
             metadata = extract_metadata_from_filename(fname)
             if not metadata:
                 logging.warning(f"Could not extract metadata from {fname}")
                 continue
 
-            if full_path not in PROCESSED_LINES:
-                PROCESSED_LINES[full_path] = 0
-
             try:
                 with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    f.seek(PROCESSED_LINES[full_path])
                     lines = f.readlines()
-                    PROCESSED_LINES[full_path] = f.tell()
-                    logging.debug(f"Read {len(lines)} new lines from {fname}")
+                    logging.debug(f"Read {len(lines)} lines from {fname}")
             except Exception as e:
                 logging.error(f"Failed to read {full_path}: {e}")
                 continue
@@ -90,7 +130,11 @@ def run_parser():
                             logging.error(f"Failed to write to output file: {e}")
                 else:
                     logging.debug(f"No match: {line}")
-        time.sleep(1)
+
+            PROCESSED_HASHES[fname] = file_hash
+            save_hashes()
+
+        time.sleep(2)
 
 
 if __name__ == "__main__":
