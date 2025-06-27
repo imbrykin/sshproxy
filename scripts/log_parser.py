@@ -49,7 +49,10 @@ def compute_hash(file_path):
     try:
         hasher = hashlib.md5()
         with open(file_path, 'rb') as f:
-            while chunk := f.read(8192):
+            while True:
+                chunk = f.read(8192)
+                if not chunk:
+                    break
                 hasher.update(chunk)
         return hasher.hexdigest()
     except Exception as e:
