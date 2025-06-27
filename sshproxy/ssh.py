@@ -122,6 +122,11 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         proc.close(force=True)
 
+    logged_commands = get_logged_commands(commands_file)
+    history_lines = fetch_bash_history(user, host, keyfile, logged_commands)
+    for line in history_lines:
+        log_command(line.strip(), initiator, user, host, port, pid, commands_file)
+
     history_lines = fetch_bash_history(user, host, keyfile)
     for line in history_lines:
         log_command(line, initiator, user, host, port, pid, commands_file)
@@ -138,16 +143,29 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
             "action": f"{session_type}_session_end"
         }, ensure_ascii=False) + "\n")
 
-def fetch_bash_history(target_user, target_host, keyfile):
+def fetch_bash_history(target_user, target_host, keyfile, known_commands):
     try:
         result = subprocess.run([
             "ssh", "-i", keyfile, f"{target_user}@{target_host}",
-            "tail -n 20 ~/.bash_history"
+            "tail", "-n", "20", "~/.bash_history"
         ], capture_output=True, check=True, text=True)
-        return result.stdout.strip().splitlines()
+
+        history_lines = result.stdout.strip().splitlines()
+        return [cmd for cmd in history_lines if cmd and cmd not in known_commands]
+
     except subprocess.CalledProcessError as e:
         logger.warning("Failed to fetch bash_history: %s", e)
         return []
+
+def get_logged_commands(path):
+    if not os.path.exists(path):
+        return set()
+    try:
+        with open(path, "r") as f:
+            return {json.loads(line)["command"] for line in f if "command" in line}
+    except Exception as e:
+        logger.warning("Failed to parse logged commands: %s", e)
+        return set()
 
 
 if __name__ == "__main__":
