@@ -8,6 +8,7 @@ import logging
 
 LOG_FILE = "/var/log/ssh-proxy/parser.log"
 HASHES_FILE = "/var/log/ssh-proxy/session_hashes.json"
+COMMANDS_SEEN_FILE = "/var/log/ssh-proxy/seen_commands.json"
 
 with open(LOG_FILE, "w") as log_init:
     log_init.write("")
@@ -22,6 +23,7 @@ logging.basicConfig(
 SESSIONS_DIR = "/var/log/ssh-proxy/sessions"
 OUTPUT_FILE = "/var/log/ssh-proxy/sshproxy_commands.json"
 PROCESSED_HASHES = {}
+SEEN_COMMANDS = set()
 
 ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 prompt_pattern = re.compile(r'^.*\[(?P<user>[\w.-]+)@(?P<host>[\w.-]+)\s+[~\w/\.-]*\]\$\s*(?P<cmd>.*)$')
@@ -42,6 +44,22 @@ def save_hashes():
             json.dump(PROCESSED_HASHES, f)
     except Exception as e:
         logging.error(f"Failed to save hashes: {e}")
+
+def load_seen_commands():
+    if os.path.exists(COMMANDS_SEEN_FILE):
+        try:
+            with open(COMMANDS_SEEN_FILE, 'r') as f:
+                return set(json.load(f))
+        except Exception as e:
+            logging.error(f"Failed to load seen commands: {e}")
+    return set()
+
+def save_seen_commands():
+    try:
+        with open(COMMANDS_SEEN_FILE, 'w') as f:
+            json.dump(list(SEEN_COMMANDS), f)
+    except Exception as e:
+        logging.error(f"Failed to save seen commands: {e}")
 
 def compute_hash(file_path):
     try:
@@ -73,9 +91,10 @@ def extract_metadata_from_filename(filename):
     return None
 
 def run_parser():
-    global PROCESSED_HASHES
+    global PROCESSED_HASHES, SEEN_COMMANDS
     logging.info("Starting SSH log parser...")
     PROCESSED_HASHES = load_hashes()
+    SEEN_COMMANDS = load_seen_commands()
 
     while True:
         logging.debug("Scanning for log files...")
@@ -122,6 +141,12 @@ def run_parser():
                         cmd = match.group("cmd").strip()
 
                 if cmd:
+                    dedup_key = f"{metadata['initiator']}|{metadata['target_host']}|{metadata['pid']}|{cmd}"
+                    if dedup_key in SEEN_COMMANDS:
+                        logging.debug(f"Duplicate command skipped: {cmd}")
+                        continue
+                    SEEN_COMMANDS.add(dedup_key)
+
                     record = {
                         "timestamp": datetime.utcnow().isoformat() + "Z",
                         "initiator": metadata["initiator"],
@@ -143,6 +168,7 @@ def run_parser():
 
             PROCESSED_HASHES[fname] = file_hash
             save_hashes()
+            save_seen_commands()
 
         time.sleep(2)
 
