@@ -1,14 +1,10 @@
 access_control:
+  support:
+    hbac_rule: sshproxy-support
+    allow_services:
+      - sshd
   devops:
-    allow_hosts:
-      - "*"
     hbac_rule: sshproxy-access
     allow_services:
       - sshd
       - ftp
-  support:
-    allow_hosts:
-      - "*.client.internal"
-    hbac_rule: sshproxy-support
-    allow_services:
-      - sshd
