@@ -44,6 +44,11 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
 
     try:
         subprocess.run(["script", "-q", "-f", "-c", " ".join(command), session_file], check=True)
+        commands = extract_commands_from_session_log(session_file, initiator, user, host, port, pid)
+        commands_file = os.path.join(log_dir, "sshproxy_commands.json")
+        with open(commands_file, "a") as f:
+            for cmd in commands:
+                f.write(json.dumps(cmd, ensure_ascii=False) + "\n")
     except subprocess.CalledProcessError as e:
         logger.error("Session failed: %s", e)
         # Log session failure
