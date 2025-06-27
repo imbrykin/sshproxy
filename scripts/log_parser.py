@@ -25,7 +25,7 @@ PROCESSED_HASHES = {}
 
 ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 prompt_pattern = re.compile(r'^.*\[(?P<user>[\w.-]+)@(?P<host>[\w.-]+)\s+[~\w/\.-]*\]\$\s*(?P<cmd>.*)$')
-sftp_pattern = re.compile(r'^(get|put|ls|cd|pwd|exit|rename|rm|mkdir|rmdir)\b.*$')
+sftp_pattern = re.compile(r'^sftp>\s*(?P<cmd>\w+\b.*)$')
 
 
 def load_hashes():
@@ -72,7 +72,7 @@ def extract_metadata_from_filename(filename):
                 "pid": os.getpid(),
                 "target_user": "alaris",
                 "target_port": 22,
-                "mode": "sftp" if "sftp" in parts[2] else "ssh"  # crude hint fallback
+                "mode": "sftp" if "sftp" in parts[2] else "ssh"
             }
     return None
 
@@ -117,8 +117,9 @@ def run_parser():
                 cmd = None
 
                 if metadata.get("mode") == "sftp":
-                    if sftp_pattern.match(line):
-                        cmd = line
+                    match = sftp_pattern.match(line)
+                    if match:
+                        cmd = match.group("cmd").strip()
                         action_type = "sftp_command"
                 else:
                     match = prompt_pattern.match(line)
