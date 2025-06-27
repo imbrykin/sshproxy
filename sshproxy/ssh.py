@@ -149,7 +149,7 @@ def fetch_bash_history(target_user, target_host, keyfile, known_commands):
         result = subprocess.run([
             "ssh", "-i", keyfile, f"{target_user}@{target_host}",
             "tail", "-n", "20", "~/.bash_history"
-        ], capture_output=True, check=True, text=True)
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, universal_newlines=True)
 
         history_lines = result.stdout.strip().splitlines()
         return [cmd for cmd in history_lines if cmd and cmd not in known_commands]
