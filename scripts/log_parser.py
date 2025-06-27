@@ -38,17 +38,17 @@ def extract_metadata_from_filename(filename):
 
 
 def run_parser():
-    print("[INFO] Starting SSH log parser...")
+    logging.info("Starting SSH log parser...")
     while True:
-        print("[DEBUG] Scanning for log files...")
+        logging.debug("Scanning for log files...")
         log_files = [f for f in os.listdir(SESSIONS_DIR) if f.startswith("session_") and f.endswith(".log")]
         for fname in log_files:
             full_path = os.path.join(SESSIONS_DIR, fname)
-            print(f"[DEBUG] Processing file: {full_path}")
+            logging.debug(f"Processing file: {full_path}")
 
             metadata = extract_metadata_from_filename(fname)
             if not metadata:
-                print(f"[WARNING] Could not extract metadata from {fname}")
+                logging.warning(f"Could not extract metadata from {fname}")
                 continue
 
             if full_path not in PROCESSED_LINES:
@@ -59,14 +59,14 @@ def run_parser():
                     f.seek(PROCESSED_LINES[full_path])
                     lines = f.readlines()
                     PROCESSED_LINES[full_path] = f.tell()
-                    print(f"[DEBUG] Read {len(lines)} new lines from {fname}")
+                    logging.debug(f"Read {len(lines)} new lines from {fname}")
             except Exception as e:
-                print(f"[ERROR] Failed to read {full_path}: {e}")
+                logging.error(f"Failed to read {full_path}: {e}")
                 continue
 
             for raw_line in lines:
                 line = ansi_escape.sub('', raw_line.strip())
-                print(f"[DEBUG] Checking line: {line}")
+                logging.debug(f"Checking line: {line}")
                 match = prompt_pattern.match(line)
 
                 if match:
@@ -82,14 +82,14 @@ def run_parser():
                             "action": "ssh_command",
                             "command": cmd
                         }
-                        print(f"[INFO] Captured command: {cmd}")
+                        logging.info(f"Captured command: {cmd}")
                         try:
                             with open(OUTPUT_FILE, "a") as out:
                                 out.write(json.dumps(record) + "\n")
                         except Exception as e:
-                            print(f"[ERROR] Failed to write to output file: {e}")
+                            logging.error(f"Failed to write to output file: {e}")
                 else:
-                    print(f"[DEBUG] No match: {line}")
+                    logging.debug(f"No match: {line}")
         time.sleep(1)
 
 
