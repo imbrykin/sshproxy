@@ -110,9 +110,18 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
                         buffer += '<TAB>'
                     elif ch == '\r':
                         command_str = buffer.strip()
-                        buffer = ''
+
+                        # Вытащить предыдущую команду, если buffer пуст
+                        if not command_str:
+                            try:
+                                command_str = proc.before.strip().split('\n')[-1]
+                            except Exception:
+                                command_str = ""
+
+                        buffer = ""
                         if command_str:
                             log_command(command_str, initiator, user, host, port, pid, commands_file)
+
                     else:
                         buffer += ch
 
