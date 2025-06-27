@@ -4,68 +4,77 @@ import json
 import time
 from datetime import datetime
 
-LOG_DIR = "/var/log/ssh-proxy"
-SESSIONS_DIR = os.path.join(LOG_DIR, "sessions")
-COMMANDS_LOG = os.path.join(LOG_DIR, "sshproxy_commands.json")
-
-SEEN = set()
+SESSIONS_DIR = "/var/log/ssh-proxy/sessions"
+OUTPUT_FILE = "/var/log/ssh-proxy/sshproxy_commands.json"
+PROCESSED_LINES = {}
 
 ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-prompt_pattern = re.compile(r'^\[.*@.*\][#$]\s+(.*)')  # ловит и $ и #
+prompt_pattern = re.compile(r'^\[.*@.*\]\$\s+(.*)')
 
-def parse_filename(filename):
+def extract_metadata_from_filename(filename):
+    # Пример: session_2025-06-27T08:58:36.382976_ivan.brykin_academy.alarislabs.com.log
     parts = filename.replace("session_", "").replace(".log", "").split("_")
+    if len(parts) < 3:
+        return None
     return {
         "timestamp": parts[0],
         "initiator": parts[1],
         "target_host": parts[2],
-        "pid": int(parts[0].split("T")[1].replace(":", "").replace(".", "")[:6])  # костыль, пока нет PID
+        "pid": os.getpid(),  # Просто чтобы был; можно заменить на что-то более точное
+        "target_user": "alaris",  # Если всегда такой
+        "target_port": 22
     }
 
-def process_log(filepath):
-    meta = parse_filename(os.path.basename(filepath))
-    commands = []
-    try:
-        with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                cleaned = ansi_escape.sub('', line.strip())
-                match = prompt_pattern.match(cleaned)
-                if match:
-                    cmd = match.group(1).strip()
-                    key = f"{meta['pid']}:{cmd}"
-                    if key not in SEEN and cmd:
-                        SEEN.add(key)
-                        commands.append({
-                            "timestamp": datetime.utcnow().isoformat() + "Z",
-                            "initiator": meta["initiator"],
-                            "target_user": "alaris",
-                            "target_host": meta["target_host"],
-                            "target_port": 22,
-                            "pid": meta["pid"],
-                            "action": "ssh_command",
-                            "command": cmd
-                        })
-    except Exception as e:
-        print(f"[WARN] Failed to process {filepath}: {e}")
-    return commands
+def follow_log_file(path, start_from=0):
+    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+        f.seek(start_from)
+        while True:
+            line = f.readline()
+            if not line:
+                time.sleep(0.5)
+                continue
+            yield line.strip()
 
-def main():
+def run_parser():
     print("[INFO] Starting SSH log parser...")
     while True:
-        try:
-            files = sorted(os.listdir(SESSIONS_DIR))
-            for fname in files:
-                if fname.startswith("session_") and fname.endswith(".log"):
-                    full_path = os.path.join(SESSIONS_DIR, fname)
-                    cmds = process_log(full_path)
-                    if cmds:
-                        with open(COMMANDS_LOG, "a") as out:
-                            for c in cmds:
-                                out.write(json.dumps(c, ensure_ascii=False) + "\n")
-                        print(f"[+] Parsed {len(cmds)} new commands from {fname}")
-        except Exception as e:
-            print(f"[ERROR] {e}")
-        time.sleep(2)
+        log_files = [f for f in os.listdir(SESSIONS_DIR) if f.startswith("session_") and f.endswith(".log")]
+        for fname in log_files:
+            full_path = os.path.join(SESSIONS_DIR, fname)
+            metadata = extract_metadata_from_filename(fname)
+            if not metadata:
+                continue
+
+            if full_path not in PROCESSED_LINES:
+                PROCESSED_LINES[full_path] = 0
+
+            try:
+                with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    f.seek(PROCESSED_LINES[full_path])
+                    lines = f.readlines()
+                    PROCESSED_LINES[full_path] = f.tell()
+            except Exception as e:
+                continue
+
+            for raw_line in lines:
+                line = ansi_escape.sub('', raw_line.strip())
+                match = prompt_pattern.match(line)
+                if match:
+                    cmd = match.group(1).strip()
+                    if cmd:
+                        record = {
+                            "timestamp": datetime.utcnow().isoformat() + "Z",
+                            "initiator": metadata["initiator"],
+                            "target_user": metadata["target_user"],
+                            "target_host": metadata["target_host"],
+                            "target_port": metadata["target_port"],
+                            "pid": metadata["pid"],
+                            "action": "ssh_command",
+                            "command": cmd
+                        }
+                        with open(OUTPUT_FILE, "a") as out:
+                            out.write(json.dumps(record) + "\n")
+        time.sleep(1)
 
 if __name__ == "__main__":
-    main()
+    run_parser()
