@@ -9,7 +9,8 @@ OUTPUT_FILE = "/var/log/ssh-proxy/sshproxy_commands.json"
 PROCESSED_LINES = {}
 
 ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-prompt_pattern = re.compile(r'^\[.*@.*\]\$\s+(.*)')
+#prompt_pattern = re.compile(r'^\[.*@.*\]\$\s+(.*)')
+prompt_pattern = re.compile(r'^\[(?P<user>[\w.-]+)@(?P<host>[\w.-]+)\s+[^\]]*\]\$\s+(?P<cmd>.+)$')
 
 def extract_metadata_from_filename(filename):
     # Старый формат:
@@ -73,9 +74,11 @@ def run_parser():
 
             for raw_line in lines:
                 line = ansi_escape.sub('', raw_line.strip())
-                match = prompt_pattern.match(line)
+                #match = prompt_pattern.match(line)
+                match = prompt_pattern.match(cleaned)
+                
                 if match:
-                    cmd = match.group(1).strip()
+                    cmd = match.group("cmd").strip()
                     if cmd:
                         record = {
                             "timestamp": datetime.utcnow().isoformat() + "Z",
