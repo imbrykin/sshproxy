@@ -85,14 +85,18 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
 
 def extract_commands_from_session_log(log_path, initiator, user, host, port, pid):
     commands = []
+    
+    # Простейший ANSI-escape паттерн
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    
+    # Промпт вида: [user@host]$
     prompt_pattern = re.compile(r'^\[.*@.*\]\$\s+(.*)')
-    ansi_escape = re.compile(r'(?:\x1B[@-_][0-?]*[ -/]*[@-~])')
 
     try:
         with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:
             for line in f:
                 raw = line.strip()
-                cleaned = ansi_escape.sub('', raw)
+                cleaned = ansi_escape.sub('', raw)  # удаляем ANSI escape
                 match = prompt_pattern.match(cleaned)
                 if match:
                     cmd = match.group(1).strip()
@@ -111,7 +115,7 @@ def extract_commands_from_session_log(log_path, initiator, user, host, port, pid
         logger.warning("Failed to extract commands from session log: %s", e)
 
     return commands
-
+    
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
