@@ -1,14 +1,9 @@
 import os
+import sys
 import json
 import logging
-import sys
-import termios
-import tty
-import select
-import codecs
 import subprocess
 from datetime import datetime
-from ptyprocess import PtyProcessUnicode
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -16,13 +11,59 @@ logging.basicConfig(level=logging.INFO)
 def run_ssh_session(user: str, host: str, port: int, mode: int):
     keyfile = os.getenv("KEY_FILE", "/etc/sshproxy/proxy_keys/external_key1")
     log_dir = os.getenv("LOG_DIR", "/var/log/ssh-proxy")
-    log_file_name = os.getenv("LOG_FILE", "sshproxy_events.json")
-    commands_file = os.path.join(log_dir, log_file_name)
+    events_file = os.path.join(log_dir, "sshproxy_events.json")
+    sessions_dir = os.path.join(log_dir, "sessions")
+    os.makedirs(sessions_dir, exist_ok=True)
 
     initiator = os.getenv("SUDO_USER") or os.getlogin()
     pid = os.getpid()
-    os.makedirs(log_dir, exist_ok=True)
+    timestamp = datetime.utcnow().isoformat()
 
+    session_type = "sftp" if mode == 1 else "ssh"
+    session_file = os.path.join(sessions_dir, f"session_{timestamp}_{initiator}_{host}.log")
+
+    if mode == 1:
+        command = ["sftp", "-o", f"Port={port}", "-o", f"IdentityFile={keyfile}", f"{user}@{host}"]
+    else:
+        command = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
+
+    # Log session start
+    event = {
+        "timestamp": timestamp + "Z",
+        "initiator": initiator,
+        "target_user": user,
+        "target_host": host,
+        "target_port": port,
+        "pid": pid,
+        "action": f"{session_type}_session_start",
+        "mode": session_type,
+        "log_file": session_file
+    }
+    with open(events_file, "a") as f:
+        f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+    try:
+        subprocess.run(["script", "-q", "-f", "-c", " ".join(command), session_file], check=True)
+    except subprocess.CalledProcessError as e:
+        logger.error("Session failed: %s", e)
+        # Log session failure
+        event = {
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "initiator": initiator,
+            "target_user": user,
+            "target_host": host,
+            "target_port": port,
+            "pid": pid,
+            "action": f"{session_type}_session_failed",
+            "error": str(e),
+            "log_file": session_file
+        }
+        with open(events_file, "a") as f:
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+        print(f"[ERROR] Session failed: {e}")
+        return
+
+    # Log session end
     event = {
         "timestamp": datetime.utcnow().isoformat() + "Z",
         "initiator": initiator,
@@ -30,206 +71,11 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
         "target_host": host,
         "target_port": port,
         "pid": pid,
-        "action": "sftp_session_start" if mode == 1 else "ssh_session_start",
-        "mode": "sftp" if mode == 1 else "ssh"
+        "action": f"{session_type}_session_end",
+        "log_file": session_file
     }
-    with open(commands_file, "a") as f:
+    with open(events_file, "a") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
-
-    if mode == 1:
-        sftp_cmd = ["sftp", "-o", f"IdentityFile={keyfile}", "-o", f"Port={port}", f"{user}@{host}"]
-        proc = PtyProcessUnicode.spawn(sftp_cmd)
-
-        buffer = ""
-        arrow_state = None
-        arrow_count = 0
-        arrow_log_buffer = []
-
-        old_settings = termios.tcgetattr(sys.stdin)
-        tty.setraw(sys.stdin.fileno())
-
-        decoder = codecs.getincrementaldecoder("utf-8")()
-        input_buffer = b""
-
-        try:
-            while proc.isalive():
-                rlist, _, _ = select.select([proc.fd, sys.stdin], [], [], 0.1)
-
-                if proc.fd in rlist:
-                    try:
-                        data = proc.read(1024)
-                        sys.stdout.write(data)
-                        sys.stdout.flush()
-                    except EOFError:
-                        break
-
-                if sys.stdin in rlist:
-                    try:
-                        ch_byte = os.read(sys.stdin.fileno(), 1)
-                        input_buffer += ch_byte
-                        try:
-                            ch = decoder.decode(input_buffer)
-                            input_buffer = b""
-                        except UnicodeDecodeError:
-                            continue
-
-                        if ch == '\x1b':
-                            esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
-                            proc.write(ch + esc_seq)
-                            if esc_seq in ('[A', '[B'):
-                                arrow = '↑' if esc_seq == '[A' else '↓'
-                                if arrow_state == arrow:
-                                    arrow_count += 1
-                                else:
-                                    if arrow_state:
-                                        arrow_log_buffer.append((arrow_state, arrow_count))
-                                    arrow_state = arrow
-                                    arrow_count = 1
-                            buffer = ''
-                            continue
-                        else:
-                            if arrow_state:
-                                arrow_log_buffer.append((arrow_state, arrow_count))
-                                for direction, count in arrow_log_buffer:
-                                    log_command(f"[{direction} x{count}]", initiator, user, host, port, pid, commands_file, action="sftp_command")
-                                arrow_log_buffer.clear()
-                                arrow_state = None
-                                arrow_count = 0
-
-                        proc.write(ch)
-
-                        if ch == '\x7f':
-                            buffer = buffer[:-1]
-                        elif ch == '\x15':
-                            buffer = ''
-                        elif ch == '\x03':
-                            buffer = ''
-                            continue
-                        elif ch == '\t':
-                            buffer += '<TAB>'
-                        elif ch == '\r':
-                            command = buffer.strip()
-                            buffer = ''
-                            if command:
-                                log_command(command, initiator, user, host, port, pid, commands_file, action="sftp_command")
-                        else:
-                            buffer += ch
-
-                    except Exception:
-                        continue
-        finally:
-            if arrow_state:
-                arrow_log_buffer.append((arrow_state, arrow_count))
-            for direction, count in arrow_log_buffer:
-                log_command(f"[{direction} x{count}]", initiator, user, host, port, pid, commands_file, action="sftp_command")
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-            proc.close(force=True)
-        return
-
-    # Default SSH mode
-    ssh_cmd = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
-    proc = PtyProcessUnicode.spawn(ssh_cmd)
-    buffer = ""
-    arrow_state = None
-    arrow_count = 0
-    arrow_log_buffer = []
-
-    old_settings = termios.tcgetattr(sys.stdin)
-    tty.setraw(sys.stdin.fileno())
-
-    decoder = codecs.getincrementaldecoder("utf-8")()
-    input_buffer = b""
-
-    try:
-        while proc.isalive():
-            rlist, _, _ = select.select([proc.fd, sys.stdin], [], [], 0.1)
-
-            if proc.fd in rlist:
-                try:
-                    data = proc.read(1024)
-                    sys.stdout.write(data)
-                    sys.stdout.flush()
-                except EOFError:
-                    break
-
-            if sys.stdin in rlist:
-                try:
-                    ch_byte = os.read(sys.stdin.fileno(), 1)
-                    input_buffer += ch_byte
-                    try:
-                        ch = decoder.decode(input_buffer)
-                        input_buffer = b""
-                    except UnicodeDecodeError:
-                        continue
-
-                    if ch == '\x1b':
-                        esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
-                        proc.write(ch + esc_seq)
-                        if esc_seq in ('[A', '[B'):
-                            arrow = '↑' if esc_seq == '[A' else '↓'
-                            if arrow_state == arrow:
-                                arrow_count += 1
-                            else:
-                                if arrow_state:
-                                    arrow_log_buffer.append((arrow_state, arrow_count))
-                                arrow_state = arrow
-                                arrow_count = 1
-                        buffer = ''
-                        continue
-                    else:
-                        if arrow_state:
-                            arrow_log_buffer.append((arrow_state, arrow_count))
-                            for direction, count in arrow_log_buffer:
-                                log_command(f"[{direction} x{count}]", initiator, user, host, port, pid, commands_file)
-                            arrow_log_buffer.clear()
-                            arrow_state = None
-                            arrow_count = 0
-
-                    proc.write(ch)
-
-                    if ch == '\x7f':
-                        buffer = buffer[:-1]
-                    elif ch == '\x15':
-                        buffer = ''
-                    elif ch == '\x03':
-                        buffer = ''
-                        continue
-                    elif ch == '\t':
-                        buffer += '<TAB>'
-                    elif ch == '\r':
-                        command = buffer.strip()
-                        buffer = ''
-                        if command:
-                            log_command(command, initiator, user, host, port, pid, commands_file)
-                    else:
-                        buffer += ch
-
-                except Exception:
-                    continue
-
-    finally:
-        if arrow_state:
-            arrow_log_buffer.append((arrow_state, arrow_count))
-        for direction, count in arrow_log_buffer:
-            log_command(f"[{direction} x{count}]", initiator, user, host, port, pid, commands_file)
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
-        proc.close(force=True)
-
-def log_command(raw: str, initiator, target_user, target_host, target_port, pid, commands_file, action="ssh_command"):
-    cleaned = raw.replace("\x1b", "").strip()
-    if cleaned:
-        event = {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "initiator": initiator,
-            "target_user": target_user,
-            "target_host": target_host,
-            "target_port": target_port,
-            "pid": pid,
-            "action": action,
-            "command": cleaned
-        }
-        with open(commands_file, "a") as f:
-            f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 if __name__ == "__main__":
     import argparse
