@@ -122,6 +122,10 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         proc.close(force=True)
 
+    history_lines = fetch_bash_history(user, host, keyfile)
+    for line in history_lines:
+        log_command(line, initiator, user, host, port, pid, commands_file)
+
     # Log session end
     with open(events_file, "a") as f:
         f.write(json.dumps({
@@ -133,6 +137,18 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
             "pid": pid,
             "action": f"{session_type}_session_end"
         }, ensure_ascii=False) + "\n")
+
+def fetch_bash_history(target_user, target_host, keyfile):
+    try:
+        result = subprocess.run([
+            "ssh", "-i", keyfile, f"{target_user}@{target_host}",
+            "tail -n 20 ~/.bash_history"
+        ], capture_output=True, check=True, text=True)
+        return result.stdout.strip().splitlines()
+    except subprocess.CalledProcessError as e:
+        logger.warning("Failed to fetch bash_history: %s", e)
+        return []
+
 
 if __name__ == "__main__":
     import argparse
