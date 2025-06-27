@@ -6,6 +6,7 @@ import codecs
 import select
 import termios
 import tty
+import subprocess
 from datetime import datetime
 from ptyprocess import PtyProcessUnicode
 
@@ -26,6 +27,30 @@ def log_command(command: str, initiator: str, user: str, host: str, port: int, p
     with open(path, "a") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
+def get_logged_commands(path):
+    if not os.path.exists(path):
+        return set()
+    try:
+        with open(path, "r") as f:
+            return {json.loads(line)["command"] for line in f if '"command"' in line}
+    except Exception as e:
+        logger.warning("Failed to parse logged commands: %s", e)
+        return set()
+
+def fetch_bash_history(target_user, target_host, keyfile, known_commands):
+    try:
+        result = subprocess.run([
+            "ssh", "-i", keyfile, f"{target_user}@{target_host}",
+            "tail", "-n", "30", "~/.bash_history"
+        ], capture_output=True, check=True, text=True)
+
+        history_lines = result.stdout.strip().splitlines()
+        return [cmd.strip() for cmd in history_lines if cmd.strip() and cmd.strip() not in known_commands]
+
+    except subprocess.CalledProcessError as e:
+        logger.warning("Failed to fetch bash_history: %s", e)
+        return []
+
 def run_ssh_session(user: str, host: str, port: int, mode: int):
     keyfile = os.getenv("KEY_FILE", "/etc/sshproxy/proxy_keys/external_key1")
     log_dir = os.getenv("LOG_DIR", "/var/log/ssh-proxy")
@@ -36,13 +61,13 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
     initiator = os.getenv("SUDO_USER") or os.getlogin()
     pid = os.getpid()
     timestamp = datetime.utcnow().isoformat()
-
     session_type = "sftp" if mode == 1 else "ssh"
 
-    if mode == 1:
-        command = ["sftp", "-o", f"Port={port}", "-o", f"IdentityFile={keyfile}", f"{user}@{host}"]
-    else:
-        command = ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
+    command = (
+        ["sftp", "-o", f"Port={port}", "-o", f"IdentityFile={keyfile}", f"{user}@{host}"]
+        if mode == 1 else
+        ["ssh", "-i", keyfile, f"{user}@{host}", "-p", str(port)]
+    )
 
     # Log session start
     with open(events_file, "a") as f:
@@ -59,13 +84,8 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
 
     proc = PtyProcessUnicode.spawn(command)
     buffer = ""
-    arrow_state = None
-    arrow_count = 0
-    arrow_log_buffer = []
-
     old_settings = termios.tcgetattr(sys.stdin)
     tty.setraw(sys.stdin.fileno())
-
     decoder = codecs.getincrementaldecoder("utf-8")()
     input_buffer = b""
 
@@ -91,7 +111,7 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
                     except UnicodeDecodeError:
                         continue
 
-                    if ch == '\x1b':
+                    if ch == '\x1b':  # Arrow keys
                         esc_seq = os.read(sys.stdin.fileno(), 2).decode(errors="ignore")
                         proc.write(ch + esc_seq)
                         continue
@@ -114,41 +134,29 @@ def run_ssh_session(user: str, host: str, port: int, mode: int):
                             log_command(command_str, initiator, user, host, port, pid, commands_file)
                     else:
                         buffer += ch
-
                 except Exception:
                     continue
-
     finally:
         termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
         proc.close(force=True)
 
-    history_lines = fetch_bash_history(user, host, keyfile)
-    for line in history_lines:
-        log_command(line, initiator, user, host, port, pid, commands_file)
+        # Log new commands from .bash_history (e.g., those entered via ↑)
+        logged_commands = get_logged_commands(commands_file)
+        history_lines = fetch_bash_history(user, host, keyfile, logged_commands)
+        for line in history_lines:
+            log_command(line, initiator, user, host, port, pid, commands_file)
 
-    # Log session end
-    with open(events_file, "a") as f:
-        f.write(json.dumps({
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            "initiator": initiator,
-            "target_user": user,
-            "target_host": host,
-            "target_port": port,
-            "pid": pid,
-            "action": f"{session_type}_session_end"
-        }, ensure_ascii=False) + "\n")
-
-def fetch_bash_history(target_user, target_host, keyfile):
-    try:
-        result = subprocess.run([
-            "ssh", "-i", keyfile, f"{target_user}@{target_host}",
-            "tail -n 20 ~/.bash_history"
-        ], capture_output=True, check=True, text=True)
-        return result.stdout.strip().splitlines()
-    except subprocess.CalledProcessError as e:
-        logger.warning("Failed to fetch bash_history: %s", e)
-        return []
-
+        # Log session end
+        with open(events_file, "a") as f:
+            f.write(json.dumps({
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "initiator": initiator,
+                "target_user": user,
+                "target_host": host,
+                "target_port": port,
+                "pid": pid,
+                "action": f"{session_type}_session_end"
+            }, ensure_ascii=False) + "\n")
 
 if __name__ == "__main__":
     import argparse
